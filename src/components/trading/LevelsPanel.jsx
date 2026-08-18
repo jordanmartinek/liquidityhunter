@@ -61,7 +61,7 @@ export default function LevelsPanel() {
   });
 
   return (
-    <div className="panel flex flex-col h-full">
+    <div className="panel flex flex-col">
       <div className="panel-header flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Layers size={12} />
@@ -76,7 +76,7 @@ export default function LevelsPanel() {
         </button>
       </div>
 
-      <div className="panel-body flex-1 overflow-y-auto space-y-1">
+      <div className="panel-body space-y-1">
         {/* Add Form */}
         {isAdding && (
           <form onSubmit={handleAdd} className="space-y-2 p-2 bg-terminal-bg rounded border border-terminal-border mb-2">

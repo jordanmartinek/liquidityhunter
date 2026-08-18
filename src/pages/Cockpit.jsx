@@ -14,33 +14,28 @@ import DisciplinePanel from '@/components/trading/DisciplinePanel';
 
 export default function Cockpit() {
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-terminal-bg">
+    <div className="h-screen w-screen flex flex-col bg-terminal-bg">
       {/* Top Bar */}
       <TopBar />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0">
         {/* LEFT RAIL — Environment, Levels, Liquidity */}
-        <div className="w-64 shrink-0 border-r border-terminal-border flex flex-col overflow-y-auto p-2 gap-2">
+        <div className="w-64 shrink-0 border-r border-terminal-border overflow-y-auto p-2 space-y-2">
           <EnvironmentPanel />
-          <div className="flex-1 min-h-0">
-            <LevelsPanel />
-          </div>
-          <div className="flex-1 min-h-0">
-            <LiquidityPanel />
-          </div>
+          <LevelsPanel />
+          <LiquidityPanel />
         </div>
 
         {/* CENTER — Chart */}
-        <div className="flex-1 flex flex-col p-2 gap-2 min-w-0">
-          {/* Simulated Price Input */}
+        <div className="flex-1 flex flex-col p-2 min-w-0 min-h-0">
           <div className="flex-1 min-h-0">
             <TradingViewChart />
           </div>
         </div>
 
         {/* RIGHT RAIL — Fib, Location, Confirmation, Authorization, Risk, Discipline */}
-        <div className="w-72 shrink-0 border-l border-terminal-border flex flex-col overflow-y-auto p-2 gap-2">
+        <div className="w-72 shrink-0 border-l border-terminal-border overflow-y-auto p-2 space-y-2">
           <FibCalculator />
           <LocationPanel />
           <ConfirmationChecklist />

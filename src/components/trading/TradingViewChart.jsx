@@ -1,9 +1,19 @@
 import React, { useEffect, useRef } from 'react';
 import { useCockpit } from '@/lib/cockpitStore';
 
+// Map internal symbols to TradingView-compatible symbols
+const SYMBOL_MAP = {
+  'NQ1!': 'PEPPERSTONE:NAS100',
+  'MNQ1!': 'PEPPERSTONE:NAS100',
+  'ES1!': 'PEPPERSTONE:US500',
+  'MES1!': 'PEPPERSTONE:US500',
+};
+
 export default function TradingViewChart() {
   const { symbol } = useCockpit();
   const containerRef = useRef(null);
+
+  const tvSymbol = SYMBOL_MAP[symbol] || 'PEPPERSTONE:NAS100';
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -17,7 +27,7 @@ export default function TradingViewChart() {
     script.async = true;
     script.innerHTML = JSON.stringify({
       autosize: true,
-      symbol: symbol,
+      symbol: tvSymbol,
       interval: '5',
       timezone: 'America/New_York',
       theme: 'dark',
@@ -25,7 +35,7 @@ export default function TradingViewChart() {
       locale: 'en',
       backgroundColor: '#070b12',
       gridColor: '#0d1320',
-      allow_symbol_change: false,
+      allow_symbol_change: true,
       hide_top_toolbar: false,
       hide_legend: false,
       save_image: false,
@@ -35,7 +45,7 @@ export default function TradingViewChart() {
     });
 
     containerRef.current.appendChild(script);
-  }, [symbol]);
+  }, [tvSymbol]);
 
   return (
     <div className="w-full h-full relative rounded overflow-hidden border border-terminal-border">
@@ -43,14 +53,6 @@ export default function TradingViewChart() {
         ref={containerRef}
         className="tradingview-widget-container w-full h-full"
       />
-      {/* Fallback for when script can't load */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="text-center text-slate-600 text-xs">
-          <div className="text-2xl mb-2">📈</div>
-          <div>TradingView Chart</div>
-          <div className="text-[10px] text-slate-700 mt-1">{symbol} • 5m • Dark</div>
-        </div>
-      </div>
     </div>
   );
 }
