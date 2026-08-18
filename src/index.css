@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #070b12;
+  --bg-surface: #0a0e17;
+  --bg-panel: #0d1320;
+  --border-color: #1e293b;
+  --border-light: #334155;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-amber: #f59e0b;
+  --accent-blue: #3b82f6;
+  --accent-orange: #f97316;
+  --accent-cyan: #06b6d4;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0a0e17;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #0a0e17;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 3px;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Tabular numbers for prices */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Panel styling */
+.panel {
+  @apply bg-terminal-surface border border-terminal-border rounded-lg;
+}
+
+.panel-header {
+  @apply px-3 py-2 border-b border-terminal-border text-xs font-semibold uppercase tracking-wider text-slate-400;
+}
+
+.panel-body {
+  @apply p-3;
+}
+
+/* Badge styles */
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
+}
+
+.badge-green {
+  @apply bg-green-500/20 text-green-400 border border-green-500/30;
+}
+
+.badge-red {
+  @apply bg-red-500/20 text-red-400 border border-red-500/30;
+}
+
+.badge-amber {
+  @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
+}
+
+.badge-blue {
+  @apply bg-blue-500/20 text-blue-400 border border-blue-500/30;
+}
+
+.badge-orange {
+  @apply bg-orange-500/20 text-orange-400 border border-orange-500/30;
+}
+
+/* Input styles */
+input, select, textarea {
+  @apply bg-terminal-bg border border-terminal-border rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-accent-blue transition-colors;
+}
+
+select {
+  @apply appearance-none cursor-pointer;
+}
+
+/* Button styles */
+.btn {
+  @apply px-3 py-1.5 rounded text-xs font-medium transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply bg-accent-blue hover:bg-blue-600 text-white;
+}
+
+.btn-success {
+  @apply bg-accent-green hover:bg-green-600 text-white;
+}
+
+.btn-danger {
+  @apply bg-accent-red hover:bg-red-600 text-white;
+}
+
+.btn-ghost {
+  @apply bg-transparent hover:bg-terminal-panel text-slate-400 hover:text-slate-200 border border-terminal-border;
+}
