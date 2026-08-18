@@ -29,7 +29,7 @@ export default function TradingViewChart() {
       autosize: true,
       symbol: tvSymbol,
       interval: '5',
-      timezone: 'America/New_York',
+      timezone: 'America/Lima',
       theme: 'dark',
       style: '1',
       locale: 'en',
