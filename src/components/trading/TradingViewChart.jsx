@@ -12,6 +12,7 @@ const SYMBOL_MAP = {
 export default function TradingViewChart() {
   const { symbol } = useCockpit();
   const containerRef = useRef(null);
+  const widgetId = useRef(`tv_chart_${Date.now()}`);
 
   const tvSymbol = SYMBOL_MAP[symbol] || 'PEPPERSTONE:NAS100';
 
@@ -21,37 +22,64 @@ export default function TradingViewChart() {
     // Clear previous widget
     containerRef.current.innerHTML = '';
 
+    // Create a container div for the widget
+    const widgetDiv = document.createElement('div');
+    widgetDiv.id = widgetId.current;
+    widgetDiv.style.width = '100%';
+    widgetDiv.style.height = '100%';
+    containerRef.current.appendChild(widgetDiv);
+
     const script = document.createElement('script');
-    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+    script.src = 'https://s3.tradingview.com/tv.js';
     script.type = 'text/javascript';
     script.async = true;
-    script.innerHTML = JSON.stringify({
-      autosize: true,
-      symbol: tvSymbol,
-      interval: '5',
-      timezone: 'America/Lima',
-      theme: 'dark',
-      style: '1',
-      locale: 'en',
-      backgroundColor: '#070b12',
-      gridColor: '#0d1320',
-      allow_symbol_change: true,
-      hide_top_toolbar: false,
-      hide_legend: false,
-      save_image: false,
-      calendar: false,
-      studies: ['STD;Volume'],
-      support_host: 'https://www.tradingview.com',
-    });
+    script.onload = () => {
+      if (window.TradingView) {
+        new window.TradingView.widget({
+          container_id: widgetId.current,
+          autosize: true,
+          symbol: tvSymbol,
+          interval: '5',
+          timezone: 'America/Lima',
+          theme: 'dark',
+          style: '1',
+          locale: 'en',
+          toolbar_bg: '#070b12',
+          enable_publishing: false,
+          allow_symbol_change: true,
+          save_image: false,
+          hide_side_toolbar: false,
+          drawings_access: { type: 'all' },
+          studies: ['STD;Volume'],
+          overrides: {
+            'paneProperties.background': '#070b12',
+            'paneProperties.backgroundType': 'solid',
+            'paneProperties.gridProperties.color': '#0d1320',
+            'paneProperties.vertGridProperties.color': '#0d1320',
+            'paneProperties.horzGridProperties.color': '#0d1320',
+            'scalesProperties.backgroundColor': '#070b12',
+            'scalesProperties.lineColor': '#1e293b',
+            'scalesProperties.textColor': '#94a3b8',
+          },
+        });
+      }
+    };
 
-    containerRef.current.appendChild(script);
+    document.head.appendChild(script);
+
+    return () => {
+      // Cleanup script
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    };
   }, [tvSymbol]);
 
   return (
     <div className="w-full h-full relative rounded overflow-hidden border border-terminal-border">
       <div
         ref={containerRef}
-        className="tradingview-widget-container w-full h-full"
+        className="w-full h-full"
       />
     </div>
   );
