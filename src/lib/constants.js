@@ -1,4 +1,4 @@
-// Instruments
+// ─── Instruments ────────────────────────────────────────────
 export const INSTRUMENTS = [
   { symbol: 'NQ1!', label: 'NQ', point_value: 20, tick: 1 },
   { symbol: 'MNQ1!', label: 'MNQ', point_value: 2, tick: 0.25 },
@@ -6,113 +6,60 @@ export const INSTRUMENTS = [
   { symbol: 'MES1!', label: 'MES', point_value: 5, tick: 0.25 },
 ];
 
-// Distance bands for level proximity
-export const DISTANCE_BANDS = [
-  { key: 'far', label: 'FAR', min: 30, color: '#64748b' },
-  { key: 'approaching', label: 'APPROACHING', min: 15, color: '#eab308' },
-  { key: 'near', label: 'NEAR', min: 5, color: '#f97316' },
-  { key: 'imminent', label: 'IMMINENT', min: 0.01, color: '#ef4444' },
-];
-
-// Setup workflow states
-export const SETUP_STATES = [
-  'Not Active',
-  'Level Approaching',
-  'Location Active',
-  'Waiting Confirmation',
-  'Confirmation Developing',
-  'Confirmation Complete',
-  'Trade Authorized',
-  'Trade Active',
-  'Target Hit',
-  'Stop Hit',
-  'Invalidated',
-  'Cancelled',
-];
-
-// Market level types
-export const LEVEL_TYPES = [
-  'PDH', 'PDL', 'PWH', 'PWL',
-  'Asia High', 'Asia Low', 'London High', 'London Low',
-  'Session High', 'Session Low',
-  'Swing High', 'Swing Low',
-  'POC', 'VAH', 'VAL', 'HVN', 'LVN',
-  'GEX Call Wall', 'GEX Put Wall', 'Gamma Flip',
-  'Psychological', 'Liquidity Pool', 'FVG', 'Custom',
-];
-
-// Liquidity zone types
-export const LIQUIDITY_TYPES = [
-  'Buy-Side', 'Sell-Side',
-  'Equal Highs', 'Equal Lows',
-  'Swing High', 'Swing Low',
-  'Session High', 'Session Low',
-  'Psychological',
-  'PDH', 'PDL', 'PWH', 'PWL',
-];
-
-// Market structure types
-export const STRUCTURE_TYPES = [
-  'Value Up', 'Value Down', 'Sideways',
-  'Strong Trend Up', 'Strong Trend Down',
-  'Weak Trend', 'Transition', 'Searching',
-];
-
-// HTF structure timeframes
-export const HTF_TIMEFRAMES = ['1H', '4H', 'Daily', 'Weekly'];
-
-// Gamma regimes
-export const GAMMA_REGIMES = ['Positive', 'Negative', 'Unknown'];
-
-// Location types
-export const LOCATION_TYPES = [
-  'Premium', 'Value', 'Discount',
-  'Outside Value', 'Liquidity Zone',
-  'LVN', 'HVN',
-  'Fib Discount', 'Fib Premium',
-  'GEX Level', 'Swing Level', 'Custom',
-];
-
-// Trade results
-export const TRADE_RESULTS = ['Win', 'Loss', 'Breakeven', 'Open'];
-
-// Game grades
-export const GAME_GRADES = ['A', 'B', 'C'];
-
-// Emotional states
-export const EMOTIONAL_STATES = [
-  'Calm', 'Focused', 'Frustrated', 'FOMO',
-  'Revenge', 'Bored', 'Overconfident', 'Distracted',
-];
-
-// Level timeframes
+// ─── Timeframes ─────────────────────────────────────────────
 export const TIMEFRAMES = ['1m', '5m', '15m', '1H', '4H', 'Daily', 'Weekly'];
 
-// Default risk profile
-export const DEFAULT_RISK_PROFILE = {
-  account_size: 50000,
-  daily_loss_limit: 1000,
-  max_trade_risk: 200,
-  max_contracts: 5,
-  max_trades: 3,
-  max_consecutive_losses: 2,
-  nq_point_value: 20,
-  mnq_point_value: 2,
-  es_point_value: 50,
-  mes_point_value: 5,
-  session_start: '09:30',
-  session_end: '11:00',
-  hard_lock: false,
-  volume_threshold: 20000,
-  imbalance_threshold: 400,
-};
+// ─── Liquidity Side ─────────────────────────────────────────
+export const LIQUIDITY_SIDES = ['Buy-Side', 'Sell-Side'];
 
-// Default confirmation checklist items
-export const DEFAULT_CONFIRMATIONS = [
-  { id: 'aggression', label: 'Aggressive buyers/sellers at level', checked: false },
-  { id: 'effort_result', label: 'Effort vs Result divergence', checked: false },
-  { id: 'delta_shift', label: 'Delta shift / absorption', checked: false },
-  { id: 'imbalance', label: 'Stacked imbalances', checked: false },
-  { id: 'second_test', label: 'Second test / failure', checked: false },
-  { id: 'entry_trigger', label: 'Entry trigger (candle close / break)', checked: false },
+// ─── Liquidity Pool Types ───────────────────────────────────
+export const POOL_TYPES = [
+  'Equal Highs',
+  'Equal Lows',
+  'Swing High',
+  'Swing Low',
+  'Session High',
+  'Session Low',
+  'Relative High',
+  'Relative Low',
+  'PDH',
+  'PDL',
+  'PWH',
+  'PWL',
+  'PMH',
+  'PML',
+  'All-Time High',
+  'All-Time Low',
+  'Psychological',
+  'Gap / Imbalance',
+  'Custom',
 ];
+
+// ─── Sweep Status ───────────────────────────────────────────
+export const SWEEP_STATUSES = ['Untouched', 'Tested', 'Swept'];
+
+// ─── Strength Levels & Colors ───────────────────────────────
+// 1 = weakest (dim), 5 = strongest (hot)
+export const STRENGTH_LEVELS = [
+  { level: 1, label: 'Weak', color: '#4b5563', bgColor: 'rgba(75,85,99,0.3)' },       // dim gray
+  { level: 2, label: 'Minor', color: '#6366f1', bgColor: 'rgba(99,102,241,0.3)' },     // indigo/slate blue
+  { level: 3, label: 'Moderate', color: '#eab308', bgColor: 'rgba(234,179,8,0.3)' },   // amber
+  { level: 4, label: 'Strong', color: '#f97316', bgColor: 'rgba(249,115,22,0.3)' },    // orange
+  { level: 5, label: 'Critical', color: '#ec4899', bgColor: 'rgba(236,72,153,0.3)' },  // hot pink/magenta
+];
+
+// Helper: get strength config by level
+export function getStrengthConfig(level) {
+  return STRENGTH_LEVELS.find((s) => s.level === level) || STRENGTH_LEVELS[2];
+}
+
+// ─── Draw Direction ─────────────────────────────────────────
+export const DRAW_DIRECTIONS = ['Buy-Side (Up)', 'Sell-Side (Down)', 'Neutral / Unclear'];
+
+// ─── TradingView Symbol Map ─────────────────────────────────
+export const TV_SYMBOL_MAP = {
+  'NQ1!': 'PEPPERSTONE:NAS100',
+  'MNQ1!': 'PEPPERSTONE:NAS100',
+  'ES1!': 'PEPPERSTONE:US500',
+  'MES1!': 'PEPPERSTONE:US500',
+};

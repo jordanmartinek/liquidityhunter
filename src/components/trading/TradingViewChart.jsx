@@ -1,20 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { useCockpit } from '@/lib/cockpitStore';
-
-// Map internal symbols to TradingView-compatible symbols
-const SYMBOL_MAP = {
-  'NQ1!': 'PEPPERSTONE:NAS100',
-  'MNQ1!': 'PEPPERSTONE:NAS100',
-  'ES1!': 'PEPPERSTONE:US500',
-  'MES1!': 'PEPPERSTONE:US500',
-};
+import { useResearch } from '@/lib/researchStore';
+import { TV_SYMBOL_MAP } from '@/lib/constants';
 
 export default function TradingViewChart() {
-  const { symbol } = useCockpit();
+  const { symbol } = useResearch();
   const containerRef = useRef(null);
   const widgetId = useRef(`tv_chart_${Date.now()}`);
 
-  const tvSymbol = SYMBOL_MAP[symbol] || 'PEPPERSTONE:NAS100';
+  const tvSymbol = TV_SYMBOL_MAP[symbol] || 'PEPPERSTONE:NAS100';
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -39,7 +32,7 @@ export default function TradingViewChart() {
           container_id: widgetId.current,
           autosize: true,
           symbol: tvSymbol,
-          interval: '5',
+          interval: '15',
           timezone: 'America/Lima',
           theme: 'dark',
           style: '1',
@@ -68,7 +61,6 @@ export default function TradingViewChart() {
     document.head.appendChild(script);
 
     return () => {
-      // Cleanup script
       if (script.parentNode) {
         script.parentNode.removeChild(script);
       }

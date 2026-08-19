@@ -1,102 +1,48 @@
 import React from 'react';
-import { useCockpit } from '@/lib/cockpitStore';
+import { useResearch } from '@/lib/researchStore';
 
 export default function BottomBar() {
-  const {
-    volumeObs,
-    delta,
-    effortResult,
-    setup,
-    confirmationCount,
-    confirmationTotal,
-    dailyPnL,
-    executionScore,
-    todayTrades,
-    violations,
-  } = useCockpit();
+  const { totalLevels, untouchedCount, testedCount, sweptCount, bslCount, sslCount, activeTimeframe } = useResearch();
 
   return (
-    <div className="h-8 bg-terminal-surface border-t border-terminal-border flex items-center px-4 gap-6 shrink-0 text-xs">
-      {/* Volume */}
+    <div className="h-7 bg-terminal-surface border-t border-terminal-border flex items-center px-4 gap-5 shrink-0 text-[10px]">
+      {/* Active TF */}
       <div className="flex items-center gap-1">
-        <span className="text-slate-500">VOL:</span>
-        <span className="text-slate-300 tabular-nums">{volumeObs || '—'}</span>
+        <span className="text-slate-500">VIEW:</span>
+        <span className="text-blue-400 font-medium">{activeTimeframe}</span>
       </div>
 
-      {/* Delta */}
+      {/* Total Levels */}
       <div className="flex items-center gap-1">
-        <span className="text-slate-500">DELTA:</span>
-        <span className="text-slate-300">{delta || '—'}</span>
+        <span className="text-slate-500">LEVELS:</span>
+        <span className="text-slate-300 tabular-nums">{totalLevels}</span>
       </div>
 
-      {/* Effort/Result */}
+      {/* BSL / SSL */}
       <div className="flex items-center gap-1">
-        <span className="text-slate-500">E/R:</span>
-        <span className="text-slate-300">{effortResult || '—'}</span>
-      </div>
-
-      {/* Setup State */}
-      <div className="flex items-center gap-1">
-        <span className="text-slate-500">SETUP:</span>
-        <span className={`${
-          setup.state === 'Trade Authorized' ? 'text-green-400' :
-          setup.state === 'Not Active' ? 'text-slate-500' :
-          'text-amber-400'
-        }`}>
-          {setup.state}
-        </span>
-      </div>
-
-      {/* Confirmations */}
-      <div className="flex items-center gap-1">
-        <span className="text-slate-500">CONFIRMS:</span>
-        <span className={`tabular-nums ${
-          confirmationCount === confirmationTotal ? 'text-green-400' :
-          confirmationCount > 0 ? 'text-amber-400' :
-          'text-slate-500'
-        }`}>
-          {confirmationCount}/{confirmationTotal}
-        </span>
+        <span className="text-cyan-600">BSL:</span>
+        <span className="text-slate-300 tabular-nums">{bslCount}</span>
+        <span className="text-slate-600 mx-0.5">/</span>
+        <span className="text-orange-600">SSL:</span>
+        <span className="text-slate-300 tabular-nums">{sslCount}</span>
       </div>
 
       <div className="flex-1" />
 
-      {/* Trades Count */}
-      <div className="flex items-center gap-1">
-        <span className="text-slate-500">TRADES:</span>
-        <span className="text-slate-300 tabular-nums">{todayTrades.length}</span>
-      </div>
-
-      {/* Violations */}
-      <div className="flex items-center gap-1">
-        <span className="text-slate-500">VIOLATIONS:</span>
-        <span className={`tabular-nums ${violations.length > 0 ? 'text-red-400' : 'text-slate-500'}`}>
-          {violations.length}
-        </span>
-      </div>
-
-      {/* P&L */}
-      <div className="flex items-center gap-1">
-        <span className="text-slate-500">P&L:</span>
-        <span className={`font-semibold tabular-nums ${
-          dailyPnL > 0 ? 'text-green-400' :
-          dailyPnL < 0 ? 'text-red-400' :
-          'text-slate-400'
-        }`}>
-          ${dailyPnL.toFixed(0)}
-        </span>
-      </div>
-
-      {/* Execution Score */}
-      <div className="flex items-center gap-1">
-        <span className="text-slate-500">EXEC:</span>
-        <span className={`font-semibold tabular-nums ${
-          executionScore >= 80 ? 'text-green-400' :
-          executionScore >= 60 ? 'text-amber-400' :
-          'text-red-400'
-        }`}>
-          {executionScore}
-        </span>
+      {/* Sweep Status Breakdown */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1">
+          <span className="text-emerald-600">Untouched:</span>
+          <span className="text-slate-300 tabular-nums">{untouchedCount}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-amber-600">Tested:</span>
+          <span className="text-slate-300 tabular-nums">{testedCount}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-slate-600">Swept:</span>
+          <span className="text-slate-400 tabular-nums">{sweptCount}</span>
+        </div>
       </div>
     </div>
   );

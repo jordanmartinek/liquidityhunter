@@ -1,64 +1,83 @@
-# DisciplineTrader
+# LiquidityHunter
 
-A single-window, desktop-first trading discipline and execution system for professional futures traders. Enforces a strict **Environment → Location → Confirmation → Execution → Management → Review** workflow.
+A post-session research tool for mapping liquidity pools and building your next-session playbook. Centered around the **Liquidity Ladder** — a proportionally-spaced vertical visualization of buy-side and sell-side liquidity.
 
 ## Philosophy
 
-- **Execution quality is primary; P&L is secondary**
-- **Discipline over discretion** — the system locks you out when rules are violated
-- **Location ≠ Confirmation** — being at a good level is necessary but never sufficient
+- **Research between sessions** — not a live trading tool
+- **Find the liquidity, find the draw** — map where stops are resting
+- **The ladder tells the story** — see at a glance where price is likely drawn to
 
 ## Stack
 
 - **React 18** + **Vite 5**
 - **Tailwind CSS** (dark terminal aesthetic)
 - **localStorage** persistence (no backend required)
+- **TradingView** full widget with drawing tools
 - **Lucide React** icons
 
 ## Getting Started
 
 ```bash
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
-
-# Build for production
-npm run build
 ```
 
 ## Features
 
-- **Instrument Switcher** — NQ, MNQ, ES, MES with auto point-value calculation
-- **Session Clock** — NY timezone with PRE-MARKET / ACTIVE / OBSERVATION / CLOSED states
-- **Market Levels** — CRUD with live distance bands (FAR → APPROACHING → NEAR → IMMINENT → INSIDE ZONE)
-- **Liquidity Zones** — Buy/sell-side pools with strength ratings and "inside" detection
-- **Environment Panel** — Market structure, HTF bias, gamma regime, GEX walls, scenario planning
-- **Fibonacci Calculator** — Auto 0.705 / 0.788 / 0.886 with direction toggle and invalidation
-- **Location Panel** — Premium/Value/Discount grid with 0.886 invalidation indicator
-- **Confirmation Checklist** — Order-flow confirmation (aggression, E/R, delta, imbalance, 2nd test, trigger)
-- **Authorization Gate** — Full rule evaluation: confirmation + structure + location + discipline + risk → AUTHORIZED or WAIT
-- **Risk Calculator** — Editable risk profile (account, limits, session window, thresholds)
-- **Discipline Panel** — Emotional state tracking, consecutive-loss detection, auto-lock with logged override
+### 🪜 Liquidity Ladder
+- Vertical price-scale visualization — each level is a rung
+- **Proportionally spaced** to reflect real price distance
+- **Strength-based colors** (5-tier: gray → indigo → amber → orange → magenta)
+- **BSL/SSL** color coding (cyan above price, orange below)
+- **Sweep status**: Untouched (solid) → Tested (dashed) → Swept (faded + strikethrough)
+- **Current price marker** (diamond) at last-noted price
+- **Per-timeframe views** (1m, 5m, 15m, 1H, 4H, Daily, Weekly) + Unified
 
-## Data Persistence
+### 📊 TradingView Chart
+- Full interactive chart with **drawing tools** (lines, zones, fibs, etc.)
+- Symbol switching (NQ, ES mapped to NAS100, US500)
+- Lima timezone
 
-All data is stored in browser localStorage under the `dt_` prefix. No backend, no accounts — everything stays on your machine.
+### 📋 Level Management
+- Add levels with: price, side (BSL/SSL), pool type, strength, timeframe, notes
+- Click-to-cycle sweep status
+- Sorted by price (highest first)
+- Filtered by active timeframe
+
+### 🎯 Draw Indicator
+- Set your thesis: Buy-Side (▲), Sell-Side (▼), or Neutral
+- Add a text explanation of your draw thesis
+- Persisted between sessions
+
+### 📝 Session Notes
+- Per-date notes with auto-save
+- Navigate between dates
+- Record what happened, what's left, what's building
+
+### 📐 Fib Calculator
+- Quick discount/premium zone calculator
+- 0.618, 0.705, 0.786, 0.886 levels
 
 ## Layout
 
 ```
-┌──────────────────── TopBar ─────────────────────┐
-├──────────┬─────────────────────┬────────────────┤
-│ LEFT     │ CENTER (Chart)      │ RIGHT          │
-│ Env      │                     │ Fib/Location   │
-│ Levels   │                     │ Confirmation   │
-│ Liquidity│                     │ Auth/Risk      │
-│          │                     │ Discipline     │
-├──────────────────── BottomBar ──────────────────┤
-└─────────────────────────────────────────────────┘
+┌────────────────────────── TopBar ──────────────────────────┐
+├───────────┬─────────────────────────┬──────────────────────┤
+│ LEFT      │ CENTER                  │ RIGHT                │
+│           │                         │                      │
+│ Level     │ TradingView Chart       │ Draw Indicator       │
+│ List      │ (full drawing tools)    │ TF Tabs              │
+│           │                         │ Liquidity Ladder     │
+│ Fib Calc  │                         │ Session Notes        │
+├───────────┴─────────────────────────┴──────────────────────┤
+│ BottomBar: View TF | Levels | BSL/SSL | Sweep Status       │
+└────────────────────────────────────────────────────────────┘
 ```
+
+## Data
+
+All data persisted in browser localStorage under `dt_` and `lh_` prefixes.
 
 ## License
 
