@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, Mic, MicOff } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
+import { useVoiceInput } from '@/lib/useVoiceInput';
 
 export default function SessionNotes() {
   const { currentDate, setCurrentDate, saveSessionNote, getSessionNote, getToday } = useResearch();
   const [text, setText] = useState('');
   const [saveTimeout, setSaveTimeout] = useState(null);
+  const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
 
   // Load note for current date
   useEffect(() => {
     const note = getSessionNote(currentDate);
     setText(note?.notes || '');
   }, [currentDate, getSessionNote]);
+
+  // Append voice transcript when recording stops
+  const handleVoiceResult = (voiceText) => {
+    const newText = text ? `${text}\n${voiceText}` : voiceText;
+    setText(newText);
+    saveSessionNote(currentDate, newText);
+  };
 
   // Auto-save with debounce
   const handleChange = (newText) => {
@@ -21,6 +30,15 @@ export default function SessionNotes() {
       saveSessionNote(currentDate, newText);
     }, 800);
     setSaveTimeout(timeout);
+  };
+
+  // Toggle voice recording
+  const toggleVoice = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening(handleVoiceResult);
+    }
   };
 
   // Navigate dates
@@ -46,6 +64,20 @@ export default function SessionNotes() {
           <BookOpen size={12} />
           <span>Session Notes</span>
         </div>
+        {/* Voice button */}
+        {isSupported && (
+          <button
+            onClick={toggleVoice}
+            className={`p-1 rounded transition-all ${
+              isListening
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-terminal-panel'
+            }`}
+            title={isListening ? 'Stop recording' : 'Voice note'}
+          >
+            {isListening ? <MicOff size={12} /> : <Mic size={12} />}
+          </button>
+        )}
       </div>
 
       {/* Date Navigator */}
@@ -68,6 +100,13 @@ export default function SessionNotes() {
           <ChevronRight size={14} className={isToday ? 'opacity-30' : ''} />
         </button>
       </div>
+
+      {/* Live transcription indicator */}
+      {isListening && transcript && (
+        <div className="px-3 py-1 bg-red-500/5 border-b border-red-500/20">
+          <span className="text-[10px] text-red-400/70 italic">{transcript}</span>
+        </div>
+      )}
 
       {/* Notes Textarea */}
       <div className="flex-1 p-2">

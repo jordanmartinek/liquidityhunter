@@ -1,7 +1,104 @@
 import React, { useState } from 'react';
-import { Plus, X, Droplets, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, X, Droplets, Mic, MicOff } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
+import { useVoiceInput } from '@/lib/useVoiceInput';
 import { POOL_TYPES, LIQUIDITY_SIDES, TIMEFRAMES, SWEEP_STATUSES, STRENGTH_LEVELS, getStrengthConfig } from '@/lib/constants';
+
+/**
+ * parseVoiceLevel — attempts to extract level data from spoken text.
+ *
+ * Examples it handles:
+ *   "buy side equal highs at 21450 strength 4 on the 15 minute"
+ *   "sell side swing low 20980 strong daily"
+ *   "BSL 21380 session high"
+ *   "SSL equal lows at 21050 strength 5"
+ */
+function parseVoiceLevel(text) {
+  const lower = text.toLowerCase();
+
+  // Determine side
+  let side = 'Buy-Side';
+  if (lower.includes('sell') || lower.includes('ssl') || lower.includes('low')) {
+    side = 'Sell-Side';
+  } else if (lower.includes('buy') || lower.includes('bsl') || lower.includes('high')) {
+    side = 'Buy-Side';
+  }
+
+  // Extract price (look for 4-5+ digit numbers)
+  const priceMatch = text.match(/\b(\d{4,6}(?:\.\d{1,2})?)\b/);
+  const price = priceMatch ? parseFloat(priceMatch[1]) : 0;
+
+  // Determine pool type
+  let pool_type = 'Custom';
+  const typeMap = [
+    { keywords: ['equal high'], type: 'Equal Highs' },
+    { keywords: ['equal low'], type: 'Equal Lows' },
+    { keywords: ['swing high'], type: 'Swing High' },
+    { keywords: ['swing low'], type: 'Swing Low' },
+    { keywords: ['session high'], type: 'Session High' },
+    { keywords: ['session low'], type: 'Session Low' },
+    { keywords: ['relative high'], type: 'Relative High' },
+    { keywords: ['relative low'], type: 'Relative Low' },
+    { keywords: ['previous day high', 'pdh'], type: 'PDH' },
+    { keywords: ['previous day low', 'pdl'], type: 'PDL' },
+    { keywords: ['previous week high', 'pwh'], type: 'PWH' },
+    { keywords: ['previous week low', 'pwl'], type: 'PWL' },
+    { keywords: ['all time high', 'all-time high'], type: 'All-Time High' },
+    { keywords: ['all time low', 'all-time low'], type: 'All-Time Low' },
+    { keywords: ['psychological', 'psych'], type: 'Psychological' },
+    { keywords: ['gap', 'imbalance'], type: 'Gap / Imbalance' },
+  ];
+  for (const { keywords, type } of typeMap) {
+    if (keywords.some((k) => lower.includes(k))) {
+      pool_type = type;
+      break;
+    }
+  }
+
+  // Determine strength
+  let strength = 3;
+  const strengthMatch = lower.match(/strength\s*(\d)/);
+  if (strengthMatch) {
+    strength = Math.min(5, Math.max(1, parseInt(strengthMatch[1])));
+  } else if (lower.includes('critical') || lower.includes('very strong')) {
+    strength = 5;
+  } else if (lower.includes('strong')) {
+    strength = 4;
+  } else if (lower.includes('weak')) {
+    strength = 1;
+  } else if (lower.includes('minor')) {
+    strength = 2;
+  }
+
+  // Determine timeframe
+  let timeframe = '15m';
+  const tfMap = [
+    { keywords: ['1 minute', '1 min', 'one minute'], tf: '1m' },
+    { keywords: ['5 minute', '5 min', 'five minute'], tf: '5m' },
+    { keywords: ['15 minute', '15 min', 'fifteen minute'], tf: '15m' },
+    { keywords: ['1 hour', 'one hour', 'hourly'], tf: '1H' },
+    { keywords: ['4 hour', 'four hour'], tf: '4H' },
+    { keywords: ['daily', 'day'], tf: 'Daily' },
+    { keywords: ['weekly', 'week'], tf: 'Weekly' },
+  ];
+  for (const { keywords, tf } of tfMap) {
+    if (keywords.some((k) => lower.includes(k))) {
+      timeframe = tf;
+      break;
+    }
+  }
+
+  return {
+    name: '',
+    price,
+    pool_type,
+    side,
+    strength,
+    timeframe,
+    sweep_status: 'Untouched',
+    notes: `Voice: "${text}"`,
+  };
+}
 
 function StrengthDot({ strength }) {
   const config = getStrengthConfig(strength);
@@ -34,7 +131,9 @@ function SweepBadge({ status, onCycle }) {
 
 export default function LiquidityLevelList() {
   const { levels, addLevel, updateLevel, removeLevel, activeTimeframe, getFilteredLevels } = useResearch();
+  const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
   const [isAdding, setIsAdding] = useState(false);
+  const [voiceParsed, setVoiceParsed] = useState(null);
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -67,6 +166,47 @@ export default function LiquidityLevelList() {
     setIsAdding(false);
   };
 
+  // Voice: when recording stops, parse and show confirmation
+  const handleVoiceResult = (voiceText) => {
+    const parsed = parseVoiceLevel(voiceText);
+    if (parsed.price > 0) {
+      setVoiceParsed(parsed);
+    } else {
+      // Couldn't parse a price — show as form with notes pre-filled
+      setForm((prev) => ({ ...prev, notes: voiceText }));
+      setIsAdding(true);
+      setVoiceParsed(null);
+    }
+  };
+
+  const toggleVoice = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      setVoiceParsed(null);
+      startListening(handleVoiceResult);
+    }
+  };
+
+  const confirmVoiceLevel = () => {
+    if (voiceParsed && voiceParsed.price > 0) {
+      addLevel(voiceParsed);
+      setVoiceParsed(null);
+    }
+  };
+
+  const editVoiceLevel = () => {
+    if (voiceParsed) {
+      setForm({
+        ...voiceParsed,
+        price: voiceParsed.price.toString(),
+        strength: voiceParsed.strength,
+      });
+      setIsAdding(true);
+      setVoiceParsed(null);
+    }
+  };
+
   const cycleSweepStatus = (level) => {
     const order = ['Untouched', 'Tested', 'Swept'];
     const nextIndex = (order.indexOf(level.sweep_status) + 1) % order.length;
@@ -75,8 +215,6 @@ export default function LiquidityLevelList() {
 
   // Show levels for active timeframe
   const filteredLevels = getFilteredLevels(activeTimeframe);
-
-  // Sort: BSL above (higher prices first), SSL below (lower prices first)
   const sortedLevels = [...filteredLevels].sort((a, b) => b.price - a.price);
 
   return (
@@ -87,16 +225,80 @@ export default function LiquidityLevelList() {
           <span>Levels</span>
           <span className="text-slate-500">({filteredLevels.length})</span>
         </div>
-        <button
-          onClick={() => setIsAdding(!isAdding)}
-          className="text-slate-400 hover:text-accent-blue transition-colors"
-        >
-          <Plus size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Voice button */}
+          {isSupported && (
+            <button
+              onClick={toggleVoice}
+              className={`p-1 rounded transition-all ${
+                isListening
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-terminal-panel'
+              }`}
+              title={isListening ? 'Stop recording' : 'Voice add level'}
+            >
+              {isListening ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
+          )}
+          <button
+            onClick={() => setIsAdding(!isAdding)}
+            className="text-slate-400 hover:text-accent-blue transition-colors"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {/* Add Form */}
+        {/* Voice listening indicator */}
+        {isListening && (
+          <div className="p-2 bg-red-500/5 border border-red-500/20 rounded mb-2">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              <span className="text-[10px] text-red-400 font-medium">Listening...</span>
+            </div>
+            {transcript && (
+              <p className="text-[10px] text-slate-400 italic">"{transcript}"</p>
+            )}
+            <p className="text-[9px] text-slate-600 mt-1">
+              Say: "buy side equal highs at 21450 strength 4 on the 15 minute"
+            </p>
+          </div>
+        )}
+
+        {/* Voice parsed confirmation */}
+        {voiceParsed && (
+          <div className="p-2 bg-blue-500/5 border border-blue-500/20 rounded mb-2 space-y-1.5">
+            <div className="text-[10px] text-blue-400 font-medium">Parsed level:</div>
+            <div className="grid grid-cols-2 gap-1 text-[10px]">
+              <span className="text-slate-500">Price:</span>
+              <span className="text-slate-200 tabular-nums">{voiceParsed.price.toFixed(2)}</span>
+              <span className="text-slate-500">Side:</span>
+              <span className={voiceParsed.side === 'Buy-Side' ? 'text-cyan-400' : 'text-orange-400'}>
+                {voiceParsed.side}
+              </span>
+              <span className="text-slate-500">Type:</span>
+              <span className="text-slate-200">{voiceParsed.pool_type}</span>
+              <span className="text-slate-500">Strength:</span>
+              <span className="text-slate-200">{voiceParsed.strength}</span>
+              <span className="text-slate-500">Timeframe:</span>
+              <span className="text-slate-200">{voiceParsed.timeframe}</span>
+            </div>
+            <div className="flex gap-1 pt-1">
+              <button onClick={confirmVoiceLevel} className="btn btn-primary flex-1 text-[10px]">
+                ✓ Add
+              </button>
+              <button onClick={editVoiceLevel} className="btn btn-ghost flex-1 text-[10px]">
+                Edit
+              </button>
+              <button onClick={() => setVoiceParsed(null)} className="btn btn-ghost text-[10px]">
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Manual Add Form */}
         {isAdding && (
           <form onSubmit={handleAdd} className="space-y-2 p-2 bg-terminal-bg rounded border border-terminal-border mb-2">
             <div className="grid grid-cols-2 gap-1">
@@ -179,7 +381,7 @@ export default function LiquidityLevelList() {
         )}
 
         {/* Level List */}
-        {sortedLevels.length === 0 && !isAdding && (
+        {sortedLevels.length === 0 && !isAdding && !isListening && !voiceParsed && (
           <div className="text-center text-slate-600 text-xs py-6">
             No levels for {activeTimeframe}
           </div>
