@@ -1,6 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="4" fill="#070b12"/>
-  <path d="M8 22L16 10L24 22" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M12 18L16 12L20 18" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="16" cy="22" r="2" fill="#3b82f6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="256" fill="#09090b"/>
+  
+  <!-- Outer ring glow -->
+  <circle cx="256" cy="256" r="220" fill="none" stroke="#2dd4bf" stroke-width="4" opacity="0.3"/>
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#2dd4bf" stroke-width="2" opacity="0.15"/>
+  
+  <!-- Crosshair/target (represents hunting liquidity) -->
+  <!-- Horizontal line -->
+  <line x1="100" y1="256" x2="200" y2="256" stroke="#2dd4bf" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  <line x1="312" y1="256" x2="412" y2="256" stroke="#2dd4bf" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  <!-- Vertical line -->
+  <line x1="256" y1="100" x2="256" y2="200" stroke="#2dd4bf" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  <line x1="256" y1="312" x2="256" y2="412" stroke="#2dd4bf" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  
+  <!-- Center diamond (price marker) -->
+  <rect x="240" y="240" width="32" height="32" rx="4" fill="#2dd4bf" transform="rotate(45 256 256)" opacity="0.9"/>
+  
+  <!-- Liquidity pool indicators (dots above and below) -->
+  <!-- BSL dots (above) -->
+  <circle cx="256" cy="150" r="8" fill="#10b981" opacity="0.9"/>
+  <circle cx="220" cy="165" r="6" fill="#10b981" opacity="0.6"/>
+  <circle cx="292" cy="160" r="6" fill="#10b981" opacity="0.6"/>
+  
+  <!-- SSL dots (below) -->
+  <circle cx="256" cy="362" r="8" fill="#ef4444" opacity="0.9"/>
+  <circle cx="220" cy="347" r="6" fill="#ef4444" opacity="0.6"/>
+  <circle cx="292" cy="352" r="6" fill="#ef4444" opacity="0.6"/>
+  
+  <!-- Ladder rungs (horizontal bars representing levels) -->
+  <rect x="180" y="180" width="152" height="4" rx="2" fill="#2dd4bf" opacity="0.4"/>
+  <rect x="195" y="210" width="122" height="4" rx="2" fill="#2dd4bf" opacity="0.25"/>
+  <rect x="195" y="298" width="122" height="4" rx="2" fill="#2dd4bf" opacity="0.25"/>
+  <rect x="180" y="328" width="152" height="4" rx="2" fill="#2dd4bf" opacity="0.4"/>
 </svg>
