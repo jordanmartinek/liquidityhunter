@@ -17,7 +17,7 @@ export default function ChartPanel() {
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* Chart mode toggle bar */}
-      <div className="flex items-center justify-between px-2 py-1 border-b border-zinc-800/50 bg-zinc-950/80 shrink-0">
+      <div className="flex items-center justify-between px-2 py-1.5 border-b border-terminal-border bg-terminal-surface shrink-0">
         <div className="flex items-center gap-1">
           <button
             onClick={() => setMode('tradingview')}
@@ -25,7 +25,7 @@ export default function ChartPanel() {
               'px-2.5 py-1 rounded text-[10px] font-medium transition-all border',
               mode === 'tradingview'
                 ? 'bg-blue-500/15 text-blue-300 border-blue-500/40'
-                : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-800/50'
+                : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-terminal-panel'
             )}
           >
             TradingView
@@ -36,7 +36,7 @@ export default function ChartPanel() {
               'px-2.5 py-1 rounded text-[10px] font-medium transition-all border',
               mode === 'alpaca'
                 ? 'bg-teal-500/15 text-teal-300 border-teal-500/40'
-                : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-800/50'
+                : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-terminal-panel'
             )}
           >
             QQQ Live + Levels
@@ -49,7 +49,7 @@ export default function ChartPanel() {
             onClick={() => setShowSettings(!showSettings)}
             className={cn(
               'p-1 rounded text-[10px] transition-colors',
-              showSettings ? 'text-teal-400 bg-teal-500/10' : 'text-zinc-500 hover:text-zinc-300'
+              showSettings ? 'text-teal-400 bg-teal-500/10' : 'text-slate-500 hover:text-slate-300'
             )}
             title="Alpaca API Settings"
           >
@@ -60,13 +60,13 @@ export default function ChartPanel() {
 
       {/* Settings panel (slides down when shown) */}
       {mode === 'alpaca' && showSettings && (
-        <div className="shrink-0 p-2 border-b border-zinc-800/50">
+        <div className="shrink-0 p-2 border-b border-terminal-border">
           <AlpacaSettings onSave={() => { setKeysReady(true); setShowSettings(false); }} />
         </div>
       )}
 
       {/* Chart area */}
-      <div className="flex-1 min-h-0 p-2">
+      <div className="flex-1 min-h-[300px] md:min-h-0 p-2">
         {mode === 'tradingview' ? (
           <TradingViewChart />
         ) : keysReady ? (
