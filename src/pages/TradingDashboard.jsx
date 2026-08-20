@@ -148,7 +148,12 @@ export default function TradingDashboard() {
       const lockoutRaw = localStorage.getItem('tcai_lockout');
       if (lockoutRaw) {
         const lockout = JSON.parse(lockoutRaw);
-        if (new Date(lockout.until) > new Date()) {
+        // If lockout is more than 4 hours from now, it's stale — clear it
+        const lockoutTime = new Date(lockout.until).getTime();
+        const maxLockout = Date.now() + 4 * 60 * 60 * 1000;
+        if (lockoutTime > maxLockout || lockoutTime < Date.now()) {
+          localStorage.removeItem('tcai_lockout');
+        } else if (new Date(lockout.until) > new Date()) {
           setLockoutUntil(lockout.until);
           setPhase('post-lockout');
           return;
@@ -267,7 +272,7 @@ export default function TradingDashboard() {
     if (!session || session.status === 'ended') return;
     saveUnsweptLevels();
     const endTime = new Date().toISOString();
-    const lockUntil = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+    const lockUntil = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
 
     let sessionExecScore = 0;
     if (trades.length > 0) {

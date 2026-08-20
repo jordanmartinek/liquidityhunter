@@ -21,7 +21,7 @@ export default function EndSessionDialog({ open, onOpenChange, onConfirm, trades
         <div className="my-4 p-4 rounded-lg bg-zinc-800/50 border border-zinc-700/50 space-y-2">
           <div className="flex justify-between text-sm"><span className="text-zinc-400">Trades taken</span><span className="text-zinc-200 font-mono">{tradesCount}</span></div>
           <div className="flex justify-between text-sm"><span className="text-zinc-400">Execution score</span><span className="text-zinc-200 font-mono">{executionScore}%</span></div>
-          <div className="flex justify-between text-sm"><span className="text-zinc-400">Lockout until</span><span className="text-zinc-200 font-mono">{new Date(Date.now() + 6 * 60 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-zinc-400">Lockout until</span><span className="text-zinc-200 font-mono">{new Date(Date.now() + 4 * 60 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
         </div>
         <div className="space-y-2">
           <label className="text-xs font-medium text-zinc-300">If you could replay today, what's one thing you'd change?</label>
