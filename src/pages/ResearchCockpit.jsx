@@ -14,12 +14,12 @@ export default function ResearchCockpit() {
   const navigate = useNavigate();
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-terminal-bg">
+    <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
       {/* Top Bar */}
       <TopBar />
 
       {/* Mode Switch Banner */}
-      <div className="flex items-center justify-center px-4 py-1 bg-terminal-surface border-b border-terminal-border">
+      <div className="flex items-center justify-center px-4 py-1 bg-terminal-surface border-b border-terminal-border shrink-0">
         <button
           onClick={() => navigate('/trade')}
           className="flex items-center gap-2 px-4 py-1.5 rounded-md bg-teal-500/10 border border-teal-500/30 text-teal-400 text-xs font-medium hover:bg-teal-500/20 transition-all"
@@ -29,11 +29,11 @@ export default function ResearchCockpit() {
         </button>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex min-h-0">
+      {/* Main Content Area — stacks vertically on mobile, 3-column on desktop */}
+      <div className="flex-1 flex flex-col md:flex-row md:min-h-0 overflow-y-auto md:overflow-hidden">
         {/* LEFT RAIL — Level List, Fib Calculator */}
-        <div className="w-72 shrink-0 border-r border-terminal-border flex flex-col min-h-0">
-          <div className="flex-1 min-h-0">
+        <div className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto">
+          <div className="flex-1 md:min-h-0">
             <LiquidityLevelList />
           </div>
           <div className="shrink-0 border-t border-terminal-border">
@@ -42,14 +42,14 @@ export default function ResearchCockpit() {
         </div>
 
         {/* CENTER — TradingView Chart */}
-        <div className="flex-1 flex flex-col p-2 min-w-0 min-h-0">
-          <div className="flex-1 min-h-0">
+        <div className="flex-1 flex flex-col p-2 min-w-0 min-h-[300px] md:min-h-0">
+          <div className="flex-1 min-h-[280px] md:min-h-0">
             <TradingViewChart />
           </div>
         </div>
 
         {/* RIGHT RAIL — Ladder + Notes */}
-        <div className="w-80 shrink-0 border-l border-terminal-border flex flex-col min-h-0">
+        <div className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto">
           {/* Draw Indicator */}
           <div className="shrink-0 p-2 border-b border-terminal-border">
             <DrawIndicator />
@@ -59,12 +59,12 @@ export default function ResearchCockpit() {
           <LadderTimeframeTabs />
 
           {/* Liquidity Ladder */}
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-[200px] md:min-h-0">
             <LiquidityLadder />
           </div>
 
           {/* Session Notes */}
-          <div className="h-48 shrink-0 border-t border-terminal-border">
+          <div className="min-h-[200px] md:h-48 shrink-0 border-t border-terminal-border">
             <SessionNotes />
           </div>
         </div>

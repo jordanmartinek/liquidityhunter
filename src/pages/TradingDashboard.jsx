@@ -381,7 +381,7 @@ export default function TradingDashboard() {
       <EmergencyIntervention open={showEmergency} onClose={() => setShowEmergency(false)} />
       <Confetti trigger={confettiTrigger} />
 
-      <div className="h-screen flex flex-col overflow-hidden bg-zinc-950">
+      <div className="min-h-screen flex flex-col bg-zinc-950 md:h-screen md:overflow-hidden">
         {/* Header */}
         <header className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/30 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -404,9 +404,11 @@ export default function TradingDashboard() {
         <SessionSummaryCard session={session} />
 
         {/* Main content */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Research Levels Panel */}
-          <LevelPanel levels={researchLevels} />
+        <div className="flex-1 flex flex-col md:flex-row md:min-h-0 overflow-y-auto md:overflow-hidden">
+          {/* Research Levels Panel — hidden on mobile */}
+          <div className="hidden md:block">
+            <LevelPanel levels={researchLevels} />
+          </div>
 
           {/* Trading Controls */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
