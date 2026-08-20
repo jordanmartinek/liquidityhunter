@@ -216,6 +216,16 @@ export default function AlpacaChart() {
         timeVisible: true,
         secondsVisible: false,
       },
+      localization: {
+        timeFormatter: (timestamp) => {
+          const date = new Date(timestamp * 1000);
+          return date.toLocaleTimeString('en-US', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false });
+        },
+        dateFormatter: (timestamp) => {
+          const date = new Date(timestamp * 1000);
+          return date.toLocaleDateString('en-US', { timeZone: 'America/Lima', month: 'short', day: 'numeric' });
+        },
+      },
       handleScale: true,
       handleScroll: true,
     });
