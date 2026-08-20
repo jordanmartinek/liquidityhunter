@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
 import { useResearch } from '@/lib/researchStore';
 import { getStrengthConfig } from '@/lib/constants';
+import { detectLevels } from '@/lib/levelDetector';
 
 const ALPACA_WS_URL = 'wss://stream.data.alpaca.markets/v2/iex';
 const ALPACA_REST_URL = 'https://data.alpaca.markets/v2/stocks';
@@ -26,17 +27,30 @@ export function hasAlpacaKeys() {
 }
 
 export default function AlpacaChart() {
-  const { levels, lastPrice, updateLastPrice } = useResearch();
+  const { levels, lastPrice, updateLastPrice, addLevel } = useResearch();
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
   const priceLinesRef = useRef([]);
+  const autoLinesRef = useRef([]);
   const wsRef = useRef(null);
   const resizeObserverRef = useRef(null);
+  const barsRef = useRef([]); // Store all bars for detection
+  const lastDetectionRef = useRef(0);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   const [barCount, setBarCount] = useState(0);
+  const [autoLevels, setAutoLevels] = useState([]);
+
+  // Run level detection on bar data
+  const runDetection = useCallback(() => {
+    const bars = barsRef.current;
+    if (bars.length < 20) return;
+
+    const detected = detectLevels(bars);
+    setAutoLevels(detected);
+  }, []);
 
   // Fetch historical bars on mount
   const fetchHistoricalBars = useCallback(async () => {
@@ -142,6 +156,14 @@ export default function AlpacaChart() {
             });
           }
 
+          // Store bar and re-run detection every 5 bars
+          barsRef.current = [...barsRef.current, { ...bar, volume: msg.v }];
+          const now = Date.now();
+          if (now - lastDetectionRef.current > 60000) { // Re-detect every 60 seconds
+            lastDetectionRef.current = now;
+            runDetection();
+          }
+
           // Update last price in research store
           updateLastPrice(bar.close);
           setBarCount((prev) => prev + 1);
@@ -239,8 +261,11 @@ export default function AlpacaChart() {
           color: b.close >= b.open ? 'rgba(45,212,191,0.3)' : 'rgba(239,68,68,0.3)',
         })));
         setBarCount(bars.length);
+        barsRef.current = bars;
         // Set last price from most recent bar
         updateLastPrice(bars[bars.length - 1].close);
+        // Run initial level detection
+        runDetection();
       }
       connectWebSocket();
     });
@@ -258,19 +283,25 @@ export default function AlpacaChart() {
     };
   }, []);
 
-  // Draw levels as price lines
+  // Draw levels as price lines (research levels + auto-detected)
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
-    // Remove old price lines
+    // Remove old research price lines
     priceLinesRef.current.forEach((line) => {
       try { candleSeriesRef.current.removePriceLine(line); } catch (e) {}
     });
     priceLinesRef.current = [];
 
-    // Draw research levels
+    // Remove old auto-detected lines
+    autoLinesRef.current.forEach((line) => {
+      try { candleSeriesRef.current.removePriceLine(line); } catch (e) {}
+    });
+    autoLinesRef.current = [];
+
+    // Draw research levels (user-added)
     levels.forEach((level) => {
-      if (level.sweep_status === 'Swept') return; // Don't draw swept levels
+      if (level.sweep_status === 'Swept') return;
 
       const strength = getStrengthConfig(level.strength);
       const isBSL = level.side === 'Buy-Side';
@@ -286,7 +317,23 @@ export default function AlpacaChart() {
       });
       priceLinesRef.current.push(line);
     });
-  }, [levels]);
+
+    // Draw auto-detected levels
+    autoLevels.forEach((level) => {
+      const strength = getStrengthConfig(level.strength);
+      const isBSL = level.side === 'Buy-Side';
+
+      const line = candleSeriesRef.current.createPriceLine({
+        price: level.price,
+        color: isBSL ? '#10b981' : '#f59e0b',
+        lineWidth: level.strength >= 4 ? 2 : 1,
+        lineStyle: LineStyle.LargeDashed,
+        axisLabelVisible: true,
+        title: `⚡ ${level.name || level.pool_type}`,
+      });
+      autoLinesRef.current.push(line);
+    });
+  }, [levels, autoLevels]);
 
   return (
     <div className="w-full h-full relative rounded overflow-hidden border border-zinc-800">
@@ -304,11 +351,18 @@ export default function AlpacaChart() {
       </div>
 
       {/* Level count */}
-      {levels.filter(l => l.sweep_status !== 'Swept').length > 0 && (
-        <div className="absolute top-2 right-2 pointer-events-none z-10">
-          <span className="text-[9px] text-teal-400/70 bg-zinc-950/80 px-1.5 py-0.5 rounded border border-teal-500/20">
-            {levels.filter(l => l.sweep_status !== 'Swept').length} levels drawn
-          </span>
+      {(levels.filter(l => l.sweep_status !== 'Swept').length > 0 || autoLevels.length > 0) && (
+        <div className="absolute top-2 right-2 pointer-events-none z-10 flex flex-col items-end gap-1">
+          {levels.filter(l => l.sweep_status !== 'Swept').length > 0 && (
+            <span className="text-[9px] text-teal-400/70 bg-zinc-950/80 px-1.5 py-0.5 rounded border border-teal-500/20">
+              {levels.filter(l => l.sweep_status !== 'Swept').length} research
+            </span>
+          )}
+          {autoLevels.length > 0 && (
+            <span className="text-[9px] text-emerald-400/70 bg-zinc-950/80 px-1.5 py-0.5 rounded border border-emerald-500/20">
+              ⚡ {autoLevels.length} auto-detected
+            </span>
+          )}
         </div>
       )}
 
