@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="96" fill="#09090b"/>
+  <circle cx="256" cy="256" r="210" fill="none" stroke="#2dd4bf" stroke-width="5" opacity="0.3"/>
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#2dd4bf" stroke-width="2" opacity="0.15"/>
+  <!-- Crosshair -->
+  <line x1="90" y1="256" x2="190" y2="256" stroke="#2dd4bf" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+  <line x1="322" y1="256" x2="422" y2="256" stroke="#2dd4bf" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+  <line x1="256" y1="90" x2="256" y2="190" stroke="#2dd4bf" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+  <line x1="256" y1="322" x2="256" y2="422" stroke="#2dd4bf" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+  <!-- Center diamond -->
+  <rect x="237" y="237" width="38" height="38" rx="5" fill="#2dd4bf" transform="rotate(45 256 256)"/>
+  <!-- BSL dots -->
+  <circle cx="256" cy="140" r="12" fill="#10b981"/>
+  <circle cx="215" cy="155" r="8" fill="#10b981" opacity="0.6"/>
+  <circle cx="297" cy="150" r="8" fill="#10b981" opacity="0.6"/>
+  <!-- SSL dots -->
+  <circle cx="256" cy="372" r="12" fill="#ef4444"/>
+  <circle cx="215" cy="357" r="8" fill="#ef4444" opacity="0.6"/>
+  <circle cx="297" cy="362" r="8" fill="#ef4444" opacity="0.6"/>
+  <!-- Ladder rungs -->
+  <rect x="170" y="175" width="172" height="6" rx="3" fill="#2dd4bf" opacity="0.4"/>
+  <rect x="190" y="205" width="132" height="5" rx="2.5" fill="#2dd4bf" opacity="0.25"/>
+  <rect x="190" y="302" width="132" height="5" rx="2.5" fill="#2dd4bf" opacity="0.25"/>
+  <rect x="170" y="332" width="172" height="6" rx="3" fill="#2dd4bf" opacity="0.4"/>
+</svg>
