@@ -24,6 +24,15 @@
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });
       }
+      // Force update service worker on page load
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for (let registration of registrations) {
+            registration.update();
+          }
+        });
+      }
+      console.log('[LiquidityHunter] Build: 2026-08-18-v4');
     </script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 // Service Worker for LiquidityHunter — full offline support
-const CACHE_NAME = 'liqhunter-v3';
+const CACHE_NAME = 'liqhunter-v4';
 
 // Core app shell to cache on install
 const APP_SHELL = [
@@ -48,23 +48,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For app assets — cache first, then network
+  // For app assets — network first, fall back to cache
   if (url.origin === self.location.origin) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-
-        return fetch(event.request).then((response) => {
-          // Cache successful responses
-          if (response.status === 200) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return response;
-        }).catch(() => {
-          // If offline and not cached, return the index.html for navigation requests
+      fetch(event.request).then((response) => {
+        // Cache successful responses
+        if (response.status === 200) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return response;
+      }).catch(() => {
+        return caches.match(event.request).then((cached) => {
+          if (cached) return cached;
+          // If offline and not cached, return index.html for navigation
           if (event.request.mode === 'navigate') {
             return caches.match('/index.html');
           }
