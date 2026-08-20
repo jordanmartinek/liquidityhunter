@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── CSS Variables (Trading mode) ─────────────────────────────────────── */
+:root {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 5.9%;
+  --card-foreground: 0 0% 98%;
+  --primary: 174 72% 56%;
+  --primary-foreground: 240 10% 3.9%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --destructive: 0 62.8% 50.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 174 72% 56%;
+}
+
+/* ─── Research Mode Variables ──────────────────────────────────────────── */
 :root {
   --bg-primary: #070b12;
   --bg-surface: #0a0e17;
@@ -19,97 +39,87 @@
   --accent-cyan: #06b6d4;
 }
 
+/* ─── Base ─────────────────────────────────────────────────────────────── */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;
   scrollbar-color: #334155 #0a0e17;
 }
-
-*::-webkit-scrollbar {
-  width: 6px;
-}
-
-*::-webkit-scrollbar-track {
-  background: #0a0e17;
-}
-
-*::-webkit-scrollbar-thumb {
-  background-color: #334155;
-  border-radius: 3px;
-}
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 3px; }
+*::-webkit-scrollbar-thumb:hover { background-color: #475569; }
 
 body {
   margin: 0;
 }
 
-/* Tabular numbers for prices */
+/* ─── Tabular numbers ──────────────────────────────────────────────────── */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-/* Panel styling */
+/* ─── Research Mode Panel Styling ──────────────────────────────────────── */
 .panel {
   @apply bg-terminal-surface border border-terminal-border rounded-lg;
 }
-
 .panel-header {
   @apply px-3 py-2 border-b border-terminal-border text-xs font-semibold uppercase tracking-wider text-slate-400;
 }
-
 .panel-body {
   @apply p-3;
 }
 
-/* Badge styles */
+/* ─── Badge styles (research mode) ─────────────────────────────────────── */
 .badge {
   @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium;
 }
+.badge-green { @apply bg-green-500/20 text-green-400 border border-green-500/30; }
+.badge-red { @apply bg-red-500/20 text-red-400 border border-red-500/30; }
+.badge-amber { @apply bg-amber-500/20 text-amber-400 border border-amber-500/30; }
+.badge-blue { @apply bg-blue-500/20 text-blue-400 border border-blue-500/30; }
+.badge-orange { @apply bg-orange-500/20 text-orange-400 border border-orange-500/30; }
 
-.badge-green {
-  @apply bg-green-500/20 text-green-400 border border-green-500/30;
-}
-
-.badge-red {
-  @apply bg-red-500/20 text-red-400 border border-red-500/30;
-}
-
-.badge-amber {
-  @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
-}
-
-.badge-blue {
-  @apply bg-blue-500/20 text-blue-400 border border-blue-500/30;
-}
-
-.badge-orange {
-  @apply bg-orange-500/20 text-orange-400 border border-orange-500/30;
-}
-
-/* Input styles */
-input, select, textarea {
+/* ─── Input styles (research mode) ─────────────────────────────────────── */
+.panel input, .panel select, .panel textarea {
   @apply bg-terminal-bg border border-terminal-border rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-accent-blue transition-colors;
 }
-
-select {
+.panel select {
   @apply appearance-none cursor-pointer;
 }
 
-/* Button styles */
+/* ─── Button styles (research mode) ────────────────────────────────────── */
 .btn {
   @apply px-3 py-1.5 rounded text-xs font-medium transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
 }
+.btn-primary { @apply bg-accent-blue hover:bg-blue-600 text-white; }
+.btn-success { @apply bg-accent-green hover:bg-green-600 text-white; }
+.btn-danger { @apply bg-accent-red hover:bg-red-600 text-white; }
+.btn-ghost { @apply bg-transparent hover:bg-terminal-panel text-slate-400 hover:text-slate-200 border border-terminal-border; }
 
-.btn-primary {
-  @apply bg-accent-blue hover:bg-blue-600 text-white;
+/* ─── Trading Mode Screen Glow ─────────────────────────────────────────── */
+.screen-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  transition: box-shadow 0.5s ease;
 }
 
-.btn-success {
-  @apply bg-accent-green hover:bg-green-600 text-white;
+/* ─── Animations ───────────────────────────────────────────────────────── */
+@keyframes pulse-shrink {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.95); }
 }
-
-.btn-danger {
-  @apply bg-accent-red hover:bg-red-600 text-white;
-}
-
-.btn-ghost {
-  @apply bg-transparent hover:bg-terminal-panel text-slate-400 hover:text-slate-200 border border-terminal-border;
+.animate-pulse-shrink {
+  animation: pulse-shrink 0.3s ease-in-out;
 }

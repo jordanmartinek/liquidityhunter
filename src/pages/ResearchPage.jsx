@@ -1,11 +1,11 @@
 import React from 'react';
 import { ResearchProvider } from '@/lib/researchStore';
-import Cockpit from './Cockpit';
+import ResearchCockpit from './ResearchCockpit';
 
-export default function CockpitPage() {
+export default function ResearchPage() {
   return (
     <ResearchProvider>
-      <Cockpit />
+      <ResearchCockpit />
     </ResearchProvider>
   );
 }

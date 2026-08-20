@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import TopBar from '@/components/trading/TopBar';
 import BottomBar from '@/components/trading/BottomBar';
 import TradingViewChart from '@/components/trading/TradingViewChart';
@@ -9,11 +10,24 @@ import DrawIndicator from '@/components/trading/DrawIndicator';
 import FibCalculator from '@/components/trading/FibCalculator';
 import SessionNotes from '@/components/trading/SessionNotes';
 
-export default function Cockpit() {
+export default function ResearchCockpit() {
+  const navigate = useNavigate();
+
   return (
     <div className="h-screen w-screen flex flex-col bg-terminal-bg">
       {/* Top Bar */}
       <TopBar />
+
+      {/* Mode Switch Banner */}
+      <div className="flex items-center justify-center px-4 py-1 bg-terminal-surface border-b border-terminal-border">
+        <button
+          onClick={() => navigate('/trade')}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-md bg-teal-500/10 border border-teal-500/30 text-teal-400 text-xs font-medium hover:bg-teal-500/20 transition-all"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          Enter Trading Mode
+        </button>
+      </div>
 
       {/* Main Content Area */}
       <div className="flex-1 flex min-h-0">
