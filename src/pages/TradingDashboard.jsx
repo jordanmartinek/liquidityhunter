@@ -10,7 +10,6 @@ import { logAppUsageToday } from '@/lib/integrity';
 import { calculateTradingScore } from '@/lib/tradingScore';
 import { saveUnsweptLevels } from '@/lib/levelCarryOver';
 import { playTrappedSound } from '@/lib/sweepSound';
-import db from '@/lib/db';
 
 import DisciplineWheel from '@/components/trading/DisciplineWheel';
 import EntryRuleButtons from '@/components/trading/EntryRuleButtons';
@@ -316,24 +315,18 @@ export default function TradingDashboard() {
   if (phase === 'time-locked') {
     const timeUntil = getTimeUntilUnlock();
     return (
-      <LockedScreen
-        lockoutUntil={new Date(Date.now() + 99999999).toISOString()}
-        message="Trading Mode Locked"
-        onExpired={() => setPhase('ready')}
-      >
-        <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-950">
-          <div className="max-w-md w-full text-center space-y-6">
-            <div className="w-20 h-20 mx-auto rounded-full bg-zinc-800 border-2 border-zinc-700 flex items-center justify-center">
-              <svg className="w-10 h-10 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" strokeWidth="2" /><path d="M7 11V7a5 5 0 0110 0v4" strokeWidth="2" strokeLinecap="round" /></svg>
-            </div>
-            <h1 className="text-2xl font-bold text-zinc-100">Trading Mode Locked</h1>
-            <p className="text-zinc-400 text-sm">Trading unlocks 30 minutes before NY session (9:00 AM ET).</p>
-            <p className="text-lg font-mono text-amber-400">{timeUntil || 'Checking...'} until unlock</p>
-            <p className="text-[10px] text-zinc-600">Use Research Mode to mark up your levels in the meantime.</p>
-            <Button variant="outline" onClick={() => navigate('/')}>← Back to Research</Button>
+      <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-950">
+        <div className="max-w-md w-full text-center space-y-6">
+          <div className="w-20 h-20 mx-auto rounded-full bg-zinc-800 border-2 border-zinc-700 flex items-center justify-center">
+            <svg className="w-10 h-10 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" strokeWidth="2" /><path d="M7 11V7a5 5 0 0110 0v4" strokeWidth="2" strokeLinecap="round" /></svg>
           </div>
+          <h1 className="text-2xl font-bold text-zinc-100">Trading Mode Locked</h1>
+          <p className="text-zinc-400 text-sm">Trading unlocks 30 minutes before NY session (9:00 AM ET).</p>
+          <p className="text-lg font-mono text-amber-400">{timeUntil || 'Checking...'} until unlock</p>
+          <p className="text-[10px] text-zinc-600">Use Research Mode to mark up your levels in the meantime.</p>
+          <Button variant="outline" onClick={() => navigate('/')}>← Back to Research</Button>
         </div>
-      </LockedScreen>
+      </div>
     );
   }
 
