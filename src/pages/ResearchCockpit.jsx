@@ -25,7 +25,7 @@ export default function ResearchCockpit() {
           className="flex items-center gap-2 px-4 py-1.5 rounded-md bg-teal-500/10 border border-teal-500/30 text-teal-400 text-xs font-medium hover:bg-teal-500/20 transition-all"
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-          Enter Trading Mode
+          {localStorage.getItem('tcai_active_session') ? '← Return to Trading' : 'Enter Trading Mode'}
         </button>
       </div>
 

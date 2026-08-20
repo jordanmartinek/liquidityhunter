@@ -394,6 +394,9 @@ export default function TradingDashboard() {
             <KillZoneBadge />
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/')} className="p-1.5 rounded text-zinc-500 hover:text-teal-400 hover:bg-zinc-800/50 transition-colors" title="Research Mode">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" /></svg>
+            </button>
             <button onClick={() => setShowEmergency(true)} className="p-1.5 rounded text-zinc-500 hover:text-amber-400 hover:bg-zinc-800/50" title="Circuit Breaker">⚠</button>
             <button onClick={() => navigate('/stats')} className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50" title="Stats">📊</button>
             <Button variant="ghost" size="sm" onClick={() => setShowEndDialog(true)} className="text-xs text-zinc-500 hover:text-red-400">End</Button>
