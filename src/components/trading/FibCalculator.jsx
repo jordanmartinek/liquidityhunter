@@ -1,12 +1,64 @@
 import React, { useState } from 'react';
-import { Percent, ArrowDown, ArrowUp } from 'lucide-react';
+import { Percent, ArrowDown, ArrowUp, Mic, MicOff } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
+import { useVoiceInput } from '@/lib/useVoiceInput';
+
+/**
+ * Parse spoken swing high/low from voice.
+ * Handles: "swing high 21450", "high is 21450 low is 21000",
+ * "21450 high 21000 low", "high 21450", "low 21000"
+ */
+function parseSpokenSwing(text) {
+  const lower = text.toLowerCase();
+  const result = { high: null, low: null };
+
+  // Find all numbers (4-6 digits)
+  const numbers = [];
+  const numRegex = /(\d{4,6}(?:\.\d{1,2})?)/g;
+  let match;
+  while ((match = numRegex.exec(text)) !== null) {
+    numbers.push(parseFloat(match[1]));
+  }
+
+  // Try to match "high X" or "X high" patterns
+  const highMatch = lower.match(/(?:high|hi|top|swing high|upper)\s*(?:is|at|:)?\s*(\d{4,6}(?:\.\d{1,2})?)/);
+  if (highMatch) result.high = parseFloat(highMatch[1]);
+
+  const highMatch2 = lower.match(/(\d{4,6}(?:\.\d{1,2})?)\s*(?:high|hi|top|swing high|upper)/);
+  if (!result.high && highMatch2) result.high = parseFloat(highMatch2[1]);
+
+  // Try to match "low X" or "X low" patterns
+  const lowMatch = lower.match(/(?:low|lo|bottom|swing low|lower)\s*(?:is|at|:)?\s*(\d{4,6}(?:\.\d{1,2})?)/);
+  if (lowMatch) result.low = parseFloat(lowMatch[1]);
+
+  const lowMatch2 = lower.match(/(\d{4,6}(?:\.\d{1,2})?)\s*(?:low|lo|bottom|swing low|lower)/);
+  if (!result.low && lowMatch2) result.low = parseFloat(lowMatch2[1]);
+
+  // If we found two numbers but couldn't match labels, assume higher = high, lower = low
+  if (numbers.length >= 2 && (!result.high || !result.low)) {
+    const sorted = [...numbers].sort((a, b) => b - a);
+    if (!result.high) result.high = sorted[0];
+    if (!result.low) result.low = sorted[sorted.length - 1];
+  }
+
+  // If only one number found, try to determine from context
+  if (numbers.length === 1 && !result.high && !result.low) {
+    if (lower.includes('high') || lower.includes('top') || lower.includes('upper')) {
+      result.high = numbers[0];
+    } else if (lower.includes('low') || lower.includes('bottom') || lower.includes('lower')) {
+      result.low = numbers[0];
+    }
+  }
+
+  return result;
+}
 
 export default function FibCalculator() {
   const { lastPrice } = useResearch();
   const [direction, setDirection] = useState('Long');
   const [swingHigh, setSwingHigh] = useState('');
   const [swingLow, setSwingLow] = useState('');
+  const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
 
   const high = parseFloat(swingHigh) || 0;
   const low = parseFloat(swingLow) || 0;
@@ -16,17 +68,30 @@ export default function FibCalculator() {
   let fib_705 = 0, fib_788 = 0, fib_886 = 0;
   if (range > 0) {
     if (direction === 'Long') {
-      // Discount zone: retracing down from high toward low
       fib_705 = high - range * 0.705;
       fib_788 = high - range * 0.788;
       fib_886 = high - range * 0.886;
     } else {
-      // Premium zone: retracing up from low toward high
       fib_705 = low + range * 0.705;
       fib_788 = low + range * 0.788;
       fib_886 = low + range * 0.886;
     }
   }
+
+  // Voice handler
+  const handleVoiceResult = (voiceText) => {
+    const parsed = parseSpokenSwing(voiceText);
+    if (parsed.high) setSwingHigh(parsed.high.toString());
+    if (parsed.low) setSwingLow(parsed.low.toString());
+  };
+
+  const toggleVoice = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening(handleVoiceResult);
+    }
+  };
 
   // Determine where lastPrice sits relative to fib levels
   const getZoneStatus = () => {
@@ -55,9 +120,39 @@ export default function FibCalculator() {
         {range > 0 && (
           <span className="text-[9px] text-slate-600 ml-auto">{range.toFixed(0)} pt range</span>
         )}
+        {/* Voice button */}
+        {isSupported && (
+          <button
+            onClick={toggleVoice}
+            className={`p-1 rounded transition-all ml-1 ${
+              isListening
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-terminal-panel'
+            }`}
+            title={isListening ? 'Stop recording' : 'Voice: say "high 21450 low 21000"'}
+          >
+            {isListening ? <MicOff size={11} /> : <Mic size={11} />}
+          </button>
+        )}
       </div>
 
       <div className="panel-body space-y-3">
+        {/* Voice listening indicator */}
+        {isListening && (
+          <div className="p-2 bg-red-500/5 border border-red-500/20 rounded">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              <span className="text-[10px] text-red-400 font-medium">Listening...</span>
+            </div>
+            {transcript && (
+              <p className="text-[10px] text-slate-400 italic">"{transcript}"</p>
+            )}
+            <p className="text-[9px] text-slate-600 mt-1">
+              Say: "high 21450 low 21000" or "swing high 21450"
+            </p>
+          </div>
+        )}
+
         {/* Direction Toggle */}
         <div>
           <label className="text-[9px] text-slate-500 uppercase tracking-wider block mb-1">Retracement Into</label>
@@ -189,9 +284,9 @@ export default function FibCalculator() {
         )}
 
         {/* Empty state */}
-        {range <= 0 && (
+        {range <= 0 && !isListening && (
           <div className="text-center py-3 text-slate-600 text-[10px]">
-            Enter a swing high & low to calculate fib levels
+            Enter swing high & low — or tap 🎤 and say them
           </div>
         )}
       </div>
