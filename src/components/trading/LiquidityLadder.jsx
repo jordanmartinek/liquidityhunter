@@ -10,9 +10,9 @@ import { getStrengthConfig } from '@/lib/constants';
  * Sweep status: Untouched = solid, Tested = dashed border, Swept = faded + strikethrough.
  */
 
-function PriceMarker({ style }) {
+function PriceMarker({ percent }) {
   return (
-    <div className="absolute left-0 right-0 flex items-center z-10" style={style}>
+    <div className="absolute left-0 right-0 flex items-center z-10" style={{ top: `${percent}%`, transform: 'translateY(-50%)' }}>
       <div className="w-3 h-3 bg-white rotate-45 transform -translate-x-0.5 border border-slate-400 shadow-sm shadow-white/20" />
       <div className="flex-1 h-px bg-white/40 border-t border-dashed border-white/30" />
       <span className="text-[9px] text-white/70 font-mono ml-1 whitespace-nowrap">LAST</span>
@@ -20,24 +20,19 @@ function PriceMarker({ style }) {
   );
 }
 
-function Rung({ level, totalRange, minPrice, containerHeight }) {
+function Rung({ level, percent }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
   const isSwept = level.sweep_status === 'Swept';
   const isTested = level.sweep_status === 'Tested';
 
-  // Position: proportional to price within the visible range
-  // Higher price = closer to top (lower pixel offset)
-  const priceOffset = level.price - minPrice;
-  const positionPercent = totalRange > 0 ? (1 - priceOffset / totalRange) * 100 : 50;
-
-  // Rung width based on strength (50% to 95%)
-  const rungWidth = 40 + level.strength * 11;
+  // Rung width based on strength (50% to 90%)
+  const rungWidth = 40 + level.strength * 10;
 
   return (
     <div
       className="absolute left-0 right-0 flex items-center group"
-      style={{ top: `${positionPercent}%`, transform: 'translateY(-50%)' }}
+      style={{ top: `${percent}%`, transform: 'translateY(-50%)' }}
     >
       {/* Price label (left) */}
       <div className="w-16 shrink-0 text-right pr-2">
@@ -60,7 +55,6 @@ function Rung({ level, totalRange, minPrice, containerHeight }) {
             borderColor: strength.color,
           }}
         >
-          {/* Label inside rung */}
           <span
             className={`text-[9px] font-medium truncate px-1 ${isSwept ? 'line-through' : ''}`}
             style={{ color: strength.color }}
@@ -103,38 +97,77 @@ export default function LiquidityLadder() {
 
   const filteredLevels = getFilteredLevels(activeTimeframe);
 
-  // Compute price range for proportional spacing
-  const { minPrice, maxPrice, totalRange, paddedMin, paddedMax } = useMemo(() => {
+  // Compute positions with guaranteed minimum spacing
+  const { positions, priceMarkerPercent, topPrice, bottomPrice } = useMemo(() => {
     if (filteredLevels.length === 0) {
-      const base = lastPrice || 20000;
-      return { minPrice: base - 50, maxPrice: base + 50, totalRange: 100, paddedMin: base - 60, paddedMax: base + 60 };
+      const markerPct = lastPrice > 0 ? 50 : null;
+      return { positions: [], priceMarkerPercent: markerPct, topPrice: 0, bottomPrice: 0 };
     }
 
-    const prices = filteredLevels.map((l) => l.price);
-    if (lastPrice > 0) prices.push(lastPrice);
+    // Get all prices including lastPrice
+    const allPrices = filteredLevels.map((l) => l.price);
+    if (lastPrice > 0) allPrices.push(lastPrice);
 
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const range = max - min || 1;
-    // Add 10% padding top and bottom
-    const padding = range * 0.1;
+    const maxP = Math.max(...allPrices);
+    const minP = Math.min(...allPrices);
+    const rawRange = maxP - minP;
+
+    // Add 15% padding top and bottom
+    const padding = Math.max(rawRange * 0.15, 1); // at least 1 point padding
+    const paddedMax = maxP + padding;
+    const paddedMin = minP - padding;
+    const totalRange = paddedMax - paddedMin;
+
+    // Calculate raw proportional positions (0% = top, 100% = bottom)
+    let rawPositions = filteredLevels.map((level) => {
+      const pct = ((paddedMax - level.price) / totalRange) * 100;
+      return { level, percent: pct };
+    });
+
+    // Sort by percent (top to bottom)
+    rawPositions.sort((a, b) => a.percent - b.percent);
+
+    // Enforce minimum spacing: at least 6% between adjacent rungs
+    const MIN_GAP = 6;
+    for (let i = 1; i < rawPositions.length; i++) {
+      const gap = rawPositions[i].percent - rawPositions[i - 1].percent;
+      if (gap < MIN_GAP) {
+        rawPositions[i].percent = rawPositions[i - 1].percent + MIN_GAP;
+      }
+    }
+
+    // If positions overflowed past 95%, compress everything proportionally
+    const lastPct = rawPositions[rawPositions.length - 1]?.percent || 0;
+    if (lastPct > 94) {
+      const scale = 94 / lastPct;
+      rawPositions = rawPositions.map((p) => ({
+        ...p,
+        percent: 3 + p.percent * scale, // start at 3%, scale to fit within 3%-97%
+      }));
+    } else {
+      // Center the positions within 3%-97% range
+      const currentMin = rawPositions[0]?.percent || 0;
+      const currentMax = rawPositions[rawPositions.length - 1]?.percent || 0;
+      const currentSpan = currentMax - currentMin;
+      const availableSpan = 94; // 3% to 97%
+      const offset = 3 + (availableSpan - currentSpan) / 2 - currentMin;
+      rawPositions = rawPositions.map((p) => ({ ...p, percent: Math.max(3, Math.min(97, p.percent + offset)) }));
+    }
+
+    // Price marker position
+    let markerPct = null;
+    if (lastPrice > 0) {
+      markerPct = ((paddedMax - lastPrice) / totalRange) * 100;
+      markerPct = Math.max(2, Math.min(98, markerPct));
+    }
 
     return {
-      minPrice: min - padding,
-      maxPrice: max + padding,
-      totalRange: range + padding * 2,
-      paddedMin: min - padding,
-      paddedMax: max + padding,
+      positions: rawPositions,
+      priceMarkerPercent: markerPct,
+      topPrice: paddedMax,
+      bottomPrice: paddedMin,
     };
   }, [filteredLevels, lastPrice]);
-
-  // Current price marker position
-  const priceMarkerPosition = useMemo(() => {
-    if (lastPrice <= 0 || totalRange <= 0) return null;
-    const offset = lastPrice - minPrice;
-    const percent = (1 - offset / totalRange) * 100;
-    return Math.max(2, Math.min(98, percent));
-  }, [lastPrice, minPrice, totalRange]);
 
   if (filteredLevels.length === 0 && lastPrice <= 0) {
     return (
@@ -152,13 +185,13 @@ export default function LiquidityLadder() {
       {/* Scale labels (top & bottom) */}
       <div className="absolute top-1 left-0 right-0 flex justify-between px-1 z-10">
         <span className="text-[9px] text-slate-600 tabular-nums font-mono">
-          {(maxPrice).toFixed(0)}
+          {topPrice > 0 ? topPrice.toFixed(0) : ''}
         </span>
         <span className="text-[9px] text-slate-600">▲ BSL</span>
       </div>
       <div className="absolute bottom-1 left-0 right-0 flex justify-between px-1 z-10">
         <span className="text-[9px] text-slate-600 tabular-nums font-mono">
-          {(minPrice).toFixed(0)}
+          {bottomPrice > 0 ? bottomPrice.toFixed(0) : ''}
         </span>
         <span className="text-[9px] text-slate-600">▼ SSL</span>
       </div>
@@ -168,18 +201,13 @@ export default function LiquidityLadder() {
 
       {/* Rungs */}
       <div className="absolute inset-0 top-6 bottom-6">
-        {filteredLevels.map((level) => (
-          <Rung
-            key={level.id}
-            level={level}
-            totalRange={totalRange}
-            minPrice={minPrice}
-          />
+        {positions.map(({ level, percent }) => (
+          <Rung key={level.id} level={level} percent={percent} />
         ))}
 
         {/* Current Price Marker */}
-        {priceMarkerPosition !== null && (
-          <PriceMarker style={{ top: `${priceMarkerPosition}%` }} />
+        {priceMarkerPercent !== null && (
+          <PriceMarker percent={priceMarkerPercent} />
         )}
       </div>
     </div>

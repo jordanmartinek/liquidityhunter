@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import TopBar from '@/components/trading/TopBar';
 import BottomBar from '@/components/trading/BottomBar';
-import ChartPanel from '@/components/trading/ChartPanel';
+import TradingViewChart from '@/components/trading/TradingViewChart';
 import LiquidityLevelList from '@/components/trading/LiquidityLevelList';
 import LiquidityLadder from '@/components/trading/LiquidityLadder';
 import LadderTimeframeTabs from '@/components/trading/LadderTimeframeTabs';
@@ -41,8 +41,12 @@ export default function ResearchCockpit() {
           </div>
         </div>
 
-        {/* CENTER — Chart (toggle between TradingView and Alpaca) */}
-        <ChartPanel />
+        {/* CENTER — TradingView Chart */}
+        <div className="flex-1 flex flex-col p-2 min-w-0 min-h-[300px] md:min-h-0">
+          <div className="flex-1 min-h-0">
+            <TradingViewChart />
+          </div>
+        </div>
 
         {/* RIGHT RAIL — Ladder + Notes */}
         <div className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto">
