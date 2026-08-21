@@ -110,6 +110,14 @@ export default function TradingDashboard() {
   const isCoolingDown = cooldownLeft > 0;
   const isLocked = executionScore < LOCK_THRESHOLD || lossLimitHit || allSlotsFilled || isCoolingDown;
 
+  // Score color for execute button (same ramp as wheel glow)
+  const scoreColorRgb = useMemo(() => {
+    if (executionScore >= 80) return '45, 212, 191';
+    if (executionScore >= 60) return '34, 197, 94';
+    if (executionScore >= 40) return '234, 179, 8';
+    return '239, 68, 68';
+  }, [executionScore]);
+
   // Keyboard shortcuts
   const shortcuts = getShortcuts();
   useKeyboardShortcuts(shortcuts, {
@@ -367,12 +375,6 @@ export default function TradingDashboard() {
   }
 
   // --- Trading Phase ---
-  const scoreColorRgb = useMemo(() => {
-    if (executionScore >= 80) return '45, 212, 191';
-    if (executionScore >= 60) return '34, 197, 94';
-    if (executionScore >= 40) return '234, 179, 8';
-    return '239, 68, 68';
-  }, [executionScore]);
 
   return (
     <>
