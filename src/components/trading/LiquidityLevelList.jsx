@@ -133,6 +133,8 @@ export default function LiquidityLevelList() {
   const { levels, addLevel, updateLevel, removeLevel, activeTimeframe, getFilteredLevels } = useResearch();
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
   const [isAdding, setIsAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
   const [voiceParsed, setVoiceParsed] = useState(null);
   const [form, setForm] = useState({
     name: '',
@@ -211,6 +213,36 @@ export default function LiquidityLevelList() {
     const order = ['Untouched', 'Tested', 'Swept'];
     const nextIndex = (order.indexOf(level.sweep_status) + 1) % order.length;
     updateLevel(level.id, { sweep_status: order[nextIndex] });
+  };
+
+  const startEdit = (level) => {
+    setEditingId(level.id);
+    setEditForm({
+      name: level.name || '',
+      price: level.price.toString(),
+      pool_type: level.pool_type || 'Custom',
+      side: level.side || 'Buy-Side',
+      strength: level.strength || 3,
+      timeframe: level.timeframe || '15m',
+      sweep_status: level.sweep_status || 'Untouched',
+      notes: level.notes || '',
+    });
+  };
+
+  const saveEdit = () => {
+    if (!editForm || !editingId) return;
+    updateLevel(editingId, {
+      ...editForm,
+      price: parseFloat(editForm.price) || 0,
+      strength: parseInt(editForm.strength) || 3,
+    });
+    setEditingId(null);
+    setEditForm(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditForm(null);
   };
 
   // Show levels for active timeframe
@@ -390,6 +422,43 @@ export default function LiquidityLevelList() {
         {sortedLevels.map((level) => {
           const strength = getStrengthConfig(level.strength);
           const isSwept = level.sweep_status === 'Swept';
+          const isEditing = editingId === level.id;
+
+          if (isEditing && editForm) {
+            return (
+              <form key={level.id} onSubmit={(e) => { e.preventDefault(); saveEdit(); }}
+                className="space-y-2 p-2 bg-terminal-bg rounded border border-accent-blue/30 mb-1">
+                <div className="grid grid-cols-2 gap-1">
+                  <input placeholder="Label" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="text-xs" />
+                  <input type="number" step="0.01" placeholder="Price" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} className="text-xs" required />
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <select value={editForm.side} onChange={(e) => setEditForm({ ...editForm, side: e.target.value })} className="text-xs">
+                    {LIQUIDITY_SIDES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <select value={editForm.pool_type} onChange={(e) => setEditForm({ ...editForm, pool_type: e.target.value })} className="text-xs">
+                    {POOL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  <select value={editForm.strength} onChange={(e) => setEditForm({ ...editForm, strength: e.target.value })} className="text-xs">
+                    {STRENGTH_LEVELS.map((s) => <option key={s.level} value={s.level}>{s.level} — {s.label}</option>)}
+                  </select>
+                  <select value={editForm.timeframe} onChange={(e) => setEditForm({ ...editForm, timeframe: e.target.value })} className="text-xs">
+                    {TIMEFRAMES.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
+                  </select>
+                  <select value={editForm.sweep_status} onChange={(e) => setEditForm({ ...editForm, sweep_status: e.target.value })} className="text-xs">
+                    {SWEEP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <input placeholder="Notes" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} className="w-full text-xs" />
+                <div className="flex gap-1">
+                  <button type="submit" className="btn btn-primary flex-1 text-[10px]">Save</button>
+                  <button type="button" onClick={cancelEdit} className="btn btn-ghost text-[10px]">Cancel</button>
+                </div>
+              </form>
+            );
+          }
 
           return (
             <div
@@ -429,6 +498,15 @@ export default function LiquidityLevelList() {
                 status={level.sweep_status}
                 onCycle={() => cycleSweepStatus(level)}
               />
+
+              {/* Edit */}
+              <button
+                onClick={() => startEdit(level)}
+                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-accent-blue transition-all"
+                title="Edit level"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+              </button>
 
               {/* Remove */}
               <button
