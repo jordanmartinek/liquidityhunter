@@ -15,8 +15,8 @@ import BiasScanner from '@/components/trading/BiasScanner';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
-  const [rightPanel, setRightPanel] = useState('ladder'); // 'ladder' | 'trading' | 'paper'
-  const [ladderExpanded, setLadderExpanded] = useState(false);
+  const [centerView, setCenterView] = useState('chart'); // 'chart' | 'ladder'
+  const [rightPanel, setRightPanel] = useState('analysis'); // 'analysis' | 'trading' | 'paper'
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
@@ -35,37 +35,68 @@ export default function ResearchCockpit() {
           </div>
         </div>
 
-        {/* CENTER — TradingView Chart (hidden when ladder expanded) */}
-        {!ladderExpanded && (
-          <div className="flex-1 flex flex-col p-2 min-w-0 min-h-[300px] md:min-h-0">
-            <div className="flex-1 min-h-0">
-              <TradingViewChart />
-            </div>
-          </div>
-        )}
-
-        {/* RIGHT RAIL — Toggle between Ladder and Trading (full width when expanded) */}
-        <div className={cn(
-          'shrink-0 border-t md:border-t-0 md:border-l border-terminal-border flex flex-col md:min-h-0',
-          ladderExpanded ? 'flex-1 w-full' : 'w-full md:w-80'
-        )}>
-          {/* Panel Toggle */}
-          <div className="flex items-center shrink-0 border-b border-terminal-border bg-terminal-surface">
+        {/* CENTER — Toggle between Chart and Ladder */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-[300px] md:min-h-0">
+          {/* Center Toggle */}
+          <div className="flex items-center shrink-0 border-b border-terminal-border bg-terminal-surface px-2">
             <button
-              onClick={() => setRightPanel('ladder')}
+              onClick={() => setCenterView('chart')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
-                rightPanel === 'ladder'
-                  ? 'text-cyan-400 border-cyan-400 bg-cyan-500/5'
+                'px-4 py-2 text-xs font-semibold transition-all border-b-2',
+                centerView === 'chart'
+                  ? 'text-blue-400 border-blue-400'
+                  : 'text-slate-500 border-transparent hover:text-slate-300'
+              )}
+            >
+              📈 Chart
+            </button>
+            <button
+              onClick={() => setCenterView('ladder')}
+              className={cn(
+                'px-4 py-2 text-xs font-semibold transition-all border-b-2',
+                centerView === 'ladder'
+                  ? 'text-cyan-400 border-cyan-400'
                   : 'text-slate-500 border-transparent hover:text-slate-300'
               )}
             >
               🪜 Ladder
             </button>
+            {centerView === 'ladder' && <LadderTimeframeTabs />}
+          </div>
+
+          {/* Center Content */}
+          <div className="flex-1 min-h-0">
+            {centerView === 'chart' ? (
+              <div className="w-full h-full p-2">
+                <TradingViewChart />
+              </div>
+            ) : (
+              <div className="w-full h-full">
+                <LiquidityLadder />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT RAIL — Analysis / Trade / Paper */}
+        <div className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-terminal-border flex flex-col md:min-h-0">
+          {/* Right Panel Toggle */}
+          <div className="flex items-center shrink-0 border-b border-terminal-border bg-terminal-surface">
+            <button
+              onClick={() => setRightPanel('analysis')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
+                rightPanel === 'analysis'
+                  ? 'text-cyan-400 border-cyan-400 bg-cyan-500/5'
+                  : 'text-slate-500 border-transparent hover:text-slate-300'
+              )}
+            >
+              🧭 Analysis
+            </button>
             <button
               onClick={() => setRightPanel('trading')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
+                'flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
                 rightPanel === 'trading'
                   ? 'text-teal-400 border-teal-400 bg-teal-500/5'
                   : 'text-slate-500 border-transparent hover:text-slate-300'
@@ -76,7 +107,7 @@ export default function ResearchCockpit() {
             <button
               onClick={() => setRightPanel('paper')}
               className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
+                'flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
                 rightPanel === 'paper'
                   ? 'text-purple-400 border-purple-400 bg-purple-500/5'
                   : 'text-slate-500 border-transparent hover:text-slate-300'
@@ -86,48 +117,30 @@ export default function ResearchCockpit() {
             </button>
           </div>
 
-          {/* Panel Content */}
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {rightPanel === 'ladder' ? (
-              <>
+          {/* Right Panel Content */}
+          <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+            {rightPanel === 'analysis' ? (
+              <div className="space-y-0">
                 {/* Draw Indicator */}
-                <div className="shrink-0 p-2 border-b border-terminal-border">
+                <div className="p-3 border-b border-terminal-border">
                   <DrawIndicator />
                 </div>
 
                 {/* Bias Scanner */}
-                <div className="shrink-0 px-2 py-1.5 border-b border-terminal-border">
+                <div className="p-3 border-b border-terminal-border">
                   <BiasScanner />
                 </div>
 
-                {/* Timeframe Tabs + Expand toggle */}
-                <div className="flex items-center shrink-0">
-                  <div className="flex-1"><LadderTimeframeTabs /></div>
-                  <button
-                    onClick={() => setLadderExpanded(!ladderExpanded)}
-                    className={cn('px-2 py-1.5 border-b border-terminal-border text-[10px] font-medium transition-colors',
-                      ladderExpanded ? 'text-teal-400 hover:text-teal-300' : 'text-slate-500 hover:text-slate-300')}
-                    title={ladderExpanded ? 'Collapse ladder' : 'Expand ladder full-width'}
-                  >
-                    {ladderExpanded ? '⊟ Collapse' : '⊞ Expand'}
-                  </button>
-                </div>
-
-                {/* Liquidity Ladder */}
-                <div className="flex-1 min-h-[200px] md:min-h-0">
-                  <LiquidityLadder />
-                </div>
-
                 {/* AVWAP Plans */}
-                <div className="shrink-0 p-2 border-t border-terminal-border">
+                <div className="p-3 border-b border-terminal-border">
                   <AVWAPPlanner />
                 </div>
 
                 {/* Session Notes */}
-                <div className="min-h-[200px] md:h-48 shrink-0 border-t border-terminal-border">
+                <div className="flex-1 min-h-[200px]">
                   <SessionNotes />
                 </div>
-              </>
+              </div>
             ) : rightPanel === 'trading' ? (
               <TradingPanel />
             ) : (
