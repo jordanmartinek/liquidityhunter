@@ -1,5 +1,5 @@
 // Service Worker for LiquidityHunter — full offline support
-const CACHE_NAME = 'liqhunter-v4';
+const CACHE_NAME = 'liqhunter-v5';
 
 // Core app shell to cache on install
 const APP_SHELL = [
