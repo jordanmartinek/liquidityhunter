@@ -15,8 +15,14 @@ import { cn } from '@/lib/utils';
  * - More untouched liquidity in one direction = that's the likely draw
  */
 
-const CORS_PROXY = 'https://corsproxy.io/?';
-const YAHOO_URL = 'https://query2.finance.yahoo.com/v8/finance/chart/NQ%3DF';
+const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/NQ%3DF?interval=5m&range=5d';
+
+// Multiple CORS proxies as fallbacks
+const CORS_PROXIES = [
+  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
 
 function detectSwings(bars, lookback = 7, type = 'high') {
   const swings = [];
@@ -125,11 +131,22 @@ export default function BiasScanner() {
     setError(null);
 
     try {
-      // Fetch 5-day, 5-min NQ=F data from Yahoo via CORS proxy
-      const params = '?interval=5m&range=5d';
-      const response = await fetch(`${CORS_PROXY}${encodeURIComponent(YAHOO_URL + params)}`);
+      // Fetch 5-day, 5-min NQ=F data from Yahoo via CORS proxy (try multiple)
+      let response = null;
+      let lastErr = null;
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      for (const makeUrl of CORS_PROXIES) {
+        try {
+          const proxyUrl = makeUrl(YAHOO_BASE);
+          const res = await fetch(proxyUrl);
+          if (res.ok) { response = res; break; }
+          lastErr = `HTTP ${res.status}`;
+        } catch (e) {
+          lastErr = e.message;
+        }
+      }
+
+      if (!response) throw new Error(lastErr || 'All proxies failed');
 
       const data = await response.json();
       const chartData = data?.chart?.result?.[0];
