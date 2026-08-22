@@ -15,8 +15,11 @@
     },
     {
       "matches": [
+        "https://liquidityhunter.vercel.app/*",
         "https://*.vercel.app/*",
+        "http://localhost/*",
         "http://localhost:*/*",
+        "http://127.0.0.1/*",
         "http://127.0.0.1:*/*"
       ],
       "js": ["writer.js"],
