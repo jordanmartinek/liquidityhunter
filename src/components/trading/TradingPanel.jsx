@@ -15,6 +15,7 @@ import OtherRulesDropdown from './OtherRulesDropdown';
 import LiquidityTargetToggle from './LiquidityTargetToggle';
 import LevelQueue from './LevelQueue';
 import DisplacementTracker from './DisplacementTracker';
+import AnchoredVWAP from './AnchoredVWAP';
 import ExecuteConfirmDialog from './ExecuteConfirmDialog';
 import TradeDetail from './TradeDetail';
 import EndSessionDialog from './EndSessionDialog';
@@ -344,6 +345,9 @@ export default function TradingPanel() {
 
           {/* Displacement Tracker */}
           <DisplacementTracker active={levelSwept} onConfirm={() => setDisplacementConfirmed(true)} />
+
+          {/* Anchored VWAP */}
+          <AnchoredVWAP />
 
           {/* Discipline Wheel */}
           <div className="flex justify-center">
