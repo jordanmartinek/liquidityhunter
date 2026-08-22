@@ -65,7 +65,7 @@ function Rung({ level, percent }) {
 
         {/* Hover tooltip */}
         <div className="absolute left-full ml-2 hidden group-hover:flex items-center z-50">
-          <div className="bg-terminal-surface border border-terminal-border rounded px-3 py-2 shadow-xl max-w-[220px]">
+          <div className="bg-terminal-surface border border-terminal-border rounded px-3 py-2 shadow-xl max-w-[300px]">
             <div className="text-[10px] text-slate-300 font-medium">{level.name || level.pool_type}</div>
             <div className="text-[9px] text-slate-500 mt-0.5">
               {level.side} • {level.pool_type} • {level.timeframe}

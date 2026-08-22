@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
   const [rightPanel, setRightPanel] = useState('ladder'); // 'ladder' | 'trading' | 'paper'
+  const [ladderExpanded, setLadderExpanded] = useState(false);
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
@@ -34,15 +35,20 @@ export default function ResearchCockpit() {
           </div>
         </div>
 
-        {/* CENTER — TradingView Chart (never remounts) */}
-        <div className="flex-1 flex flex-col p-2 min-w-0 min-h-[300px] md:min-h-0">
-          <div className="flex-1 min-h-0">
-            <TradingViewChart />
+        {/* CENTER — TradingView Chart (hidden when ladder expanded) */}
+        {!ladderExpanded && (
+          <div className="flex-1 flex flex-col p-2 min-w-0 min-h-[300px] md:min-h-0">
+            <div className="flex-1 min-h-0">
+              <TradingViewChart />
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* RIGHT RAIL — Toggle between Ladder and Trading */}
-        <div className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-terminal-border flex flex-col md:min-h-0">
+        {/* RIGHT RAIL — Toggle between Ladder and Trading (full width when expanded) */}
+        <div className={cn(
+          'shrink-0 border-t md:border-t-0 md:border-l border-terminal-border flex flex-col md:min-h-0',
+          ladderExpanded ? 'flex-1 w-full' : 'w-full md:w-80'
+        )}>
           {/* Panel Toggle */}
           <div className="flex items-center shrink-0 border-b border-terminal-border bg-terminal-surface">
             <button
@@ -94,8 +100,18 @@ export default function ResearchCockpit() {
                   <BiasScanner />
                 </div>
 
-                {/* Timeframe Tabs */}
-                <LadderTimeframeTabs />
+                {/* Timeframe Tabs + Expand toggle */}
+                <div className="flex items-center shrink-0">
+                  <div className="flex-1"><LadderTimeframeTabs /></div>
+                  <button
+                    onClick={() => setLadderExpanded(!ladderExpanded)}
+                    className={cn('px-2 py-1.5 border-b border-terminal-border text-[10px] font-medium transition-colors',
+                      ladderExpanded ? 'text-teal-400 hover:text-teal-300' : 'text-slate-500 hover:text-slate-300')}
+                    title={ladderExpanded ? 'Collapse ladder' : 'Expand ladder full-width'}
+                  >
+                    {ladderExpanded ? '⊟ Collapse' : '⊞ Expand'}
+                  </button>
+                </div>
 
                 {/* Liquidity Ladder */}
                 <div className="flex-1 min-h-[200px] md:min-h-0">
