@@ -32,6 +32,7 @@ export const POOL_TYPES = [
   'All-Time Low',
   'Psychological',
   'Gap / Imbalance',
+  'FVG',
   'Custom',
 ];
 
