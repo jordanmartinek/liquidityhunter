@@ -208,34 +208,28 @@ function FMPCrossCheck({ localBias, lastPrice }) {
     setError(null);
 
     try {
-      // Try QQQ (ETF) — always available on free plan
-      // Then scale prices to NAS100 range using lastPrice if available
-      const url = `https://financialmodelingprep.com/stable/historical-chart/5min?symbol=QQQ&apikey=${key}`;
+      // Use daily historical data — available on FMP free plan
+      // Daily swings are more significant for bias than intraday
+      const url = `https://financialmodelingprep.com/api/v3/historical-price-full/QQQ?timeseries=30&apikey=${key}`;
       const response = await fetch(url);
 
-      if (!response.ok) {
-        // Fallback to legacy endpoint
-        const legacyUrl = `https://financialmodelingprep.com/api/v3/historical-chart/5min/QQQ?apikey=${key}`;
-        const legacyRes = await fetch(legacyUrl);
-        if (!legacyRes.ok) throw new Error(`HTTP ${legacyRes.status} — check your FMP API key`);
-        var data = await legacyRes.json();
-      } else {
-        var data = await response.json();
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status} — check your FMP API key`);
+      const data = await response.json();
 
-      if (!data || data.length === 0) throw new Error('No data returned');
+      const historical = data?.historical;
+      if (!historical || historical.length === 0) throw new Error('No data returned');
 
       // Data comes newest-first, reverse for analysis
-      const bars = data.slice(0, 500).reverse().map(d => ({
+      const bars = historical.slice(0, 30).reverse().map(d => ({
         high: d.high, low: d.low, close: d.close, open: d.open,
       }));
 
       const qqqPrice = bars[bars.length - 1].close;
 
-      // Detect swing highs/lows from market data
+      // Detect swing highs/lows from daily bars (lookback 3 for daily)
       const swingHighs = [];
       const swingLows = [];
-      const lookback = 7;
+      const lookback = 3;
 
       for (let i = lookback; i < bars.length - lookback; i++) {
         let isHigh = true, isLow = true;
