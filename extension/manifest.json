@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "LiquidityHunter Price Bridge",
+  "version": "1.0.0",
+  "description": "Streams live NAS100 price from TradingView to the LiquidityHunter app",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.tradingview.com/*",
+        "https://*.tradingview.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "48": "icon48.svg",
+    "128": "icon128.svg"
+  }
+}

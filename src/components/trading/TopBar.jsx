@@ -54,7 +54,7 @@ function parseSpokenPrice(text) {
 }
 
 export default function TopBar() {
-  const { symbol, setSymbol, lastPrice, updateLastPrice, currentDate } = useResearch();
+  const { symbol, setSymbol, lastPrice, updateLastPrice, currentDate, isLive } = useResearch();
   const [priceInput, setPriceInput] = React.useState('');
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
 
@@ -150,9 +150,13 @@ export default function TopBar() {
 
         {/* Current price display */}
         {lastPrice > 0 && !isListening && (
-          <span className="text-sm font-bold tabular-nums text-white">
-            {lastPrice.toFixed(2)}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {isLive && <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Live from TradingView" />}
+            <span className="text-sm font-bold tabular-nums text-white">
+              {lastPrice.toFixed(2)}
+            </span>
+            {isLive && <span className="text-[9px] text-emerald-400/70">LIVE</span>}
+          </div>
         )}
       </div>
 

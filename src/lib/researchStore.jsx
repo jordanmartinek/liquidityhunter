@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import db, { ENTITIES } from './db';
 import { INSTRUMENTS, TIMEFRAMES } from './constants';
 
@@ -9,6 +9,9 @@ function getToday() {
   return new Date().toLocaleDateString('en-CA');
 }
 
+const LIVE_PRICE_KEY = 'lh_live_price';
+const LIVE_PRICE_STALE = 10000; // 10 seconds
+
 export function ResearchProvider({ children }) {
   // ─── Symbol ───────────────────────────────────────────────────
   const [symbol, setSymbol] = useState('NQ1!');
@@ -18,6 +21,32 @@ export function ResearchProvider({ children }) {
     const saved = localStorage.getItem('lh_last_price');
     return saved ? parseFloat(saved) : 0;
   });
+
+  // ─── Live Price Bridge ────────────────────────────────────────
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    function checkLivePrice() {
+      try {
+        const raw = localStorage.getItem(LIVE_PRICE_KEY);
+        if (!raw) { setIsLive(false); return; }
+        const data = JSON.parse(raw);
+        const age = Date.now() - data.timestamp;
+        if (age < LIVE_PRICE_STALE && data.price > 0) {
+          setLastPrice(data.price);
+          localStorage.setItem('lh_last_price', data.price.toString());
+          setIsLive(true);
+        } else {
+          setIsLive(false);
+        }
+      } catch { setIsLive(false); }
+    }
+    checkLivePrice();
+    const interval = setInterval(checkLivePrice, 1000);
+    const handleStorage = (e) => { if (e.key === LIVE_PRICE_KEY) checkLivePrice(); };
+    window.addEventListener('storage', handleStorage);
+    return () => { clearInterval(interval); window.removeEventListener('storage', handleStorage); };
+  }, []);
 
   // ─── Active Timeframe for Ladder ──────────────────────────────
   const [activeTimeframe, setActiveTimeframe] = useState('Unified');
@@ -119,6 +148,21 @@ export function ResearchProvider({ children }) {
     return levels.filter((l) => l.timeframe === timeframe);
   }, [levels]);
 
+  // ─── Auto-Sweep Detection (when live price crosses a level) ────
+  useEffect(() => {
+    if (!isLive || lastPrice <= 0 || levels.length === 0) return;
+
+    levels.forEach((level) => {
+      if (level.sweep_status !== 'Untouched') return;
+      // If price has crossed through the level (within 2 points tolerance)
+      const distance = Math.abs(lastPrice - level.price);
+      if (distance <= 2) {
+        // Auto-cycle to "Tested"
+        updateLevel(level.id, { sweep_status: 'Tested' });
+      }
+    });
+  }, [lastPrice, isLive]);
+
   // ─── Computed Stats ───────────────────────────────────────────
   const totalLevels = levels.length;
   const untouchedCount = levels.filter((l) => l.sweep_status === 'Untouched').length;
@@ -135,6 +179,7 @@ export function ResearchProvider({ children }) {
     // Price
     lastPrice,
     updateLastPrice,
+    isLive,
 
     // Timeframe
     activeTimeframe,
