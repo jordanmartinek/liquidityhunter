@@ -1,0 +1,305 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { useResearch } from '@/lib/researchStore';
+import { cn } from '@/lib/utils';
+
+const STORAGE_KEY = 'lh_paper_trades';
+
+function loadPaperTrades() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
+}
+function savePaperTrades(trades) { localStorage.setItem(STORAGE_KEY, JSON.stringify(trades)); }
+
+const RESULTS = [
+  { value: 'pending', label: 'Pending', color: 'text-zinc-400', bg: 'bg-zinc-700/50 border-zinc-600' },
+  { value: 'target_hit', label: 'Target Hit', color: 'text-emerald-400', bg: 'bg-emerald-500/15 border-emerald-500/30' },
+  { value: 'stop_hit', label: 'Stop Hit', color: 'text-red-400', bg: 'bg-red-500/15 border-red-500/30' },
+  { value: 'vwap_break', label: 'VWAP Break', color: 'text-amber-400', bg: 'bg-amber-500/15 border-amber-500/30' },
+  { value: 'breakeven', label: 'Breakeven', color: 'text-zinc-300', bg: 'bg-zinc-700/50 border-zinc-500' },
+];
+
+/**
+ * Paper Trade Panel — practice execution without risk.
+ * Same workflow: sweep → displacement → VWAP → rules → execute.
+ * No time-lock, no lockout, separate stats.
+ * Available 24/7 for building muscle memory.
+ */
+export default function PaperTradePanel() {
+  const { levels, lastPrice } = useResearch();
+  const [trades, setTrades] = useState(loadPaperTrades);
+  const [showForm, setShowForm] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [form, setForm] = useState({
+    direction: 'long',
+    entry: '',
+    stop: '',
+    target: '',
+    levelType: '',
+    setupNotes: '',
+  });
+
+  // Persist trades
+  useEffect(() => { savePaperTrades(trades); }, [trades]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const completed = trades.filter(t => t.result !== 'pending');
+    const wins = completed.filter(t => t.result === 'target_hit');
+    const losses = completed.filter(t => t.result === 'stop_hit' || t.result === 'vwap_break');
+    const totalR = completed.reduce((sum, t) => {
+      if (t.result === 'target_hit') return sum + (t.rr || 0);
+      if (t.result === 'stop_hit' || t.result === 'vwap_break') return sum - 1;
+      return sum;
+    }, 0);
+    return {
+      total: trades.length,
+      completed: completed.length,
+      pending: trades.filter(t => t.result === 'pending').length,
+      wins: wins.length,
+      losses: losses.length,
+      winRate: completed.length > 0 ? Math.round((wins.length / completed.length) * 100) : 0,
+      totalR: totalR.toFixed(1),
+    };
+  }, [trades]);
+
+  // Submit paper trade
+  const handleSubmit = () => {
+    const entry = parseFloat(form.entry) || 0;
+    const stop = parseFloat(form.stop) || 0;
+    const target = parseFloat(form.target) || 0;
+    if (!entry || !stop || !target) return;
+
+    const riskPoints = Math.abs(entry - stop);
+    const rewardPoints = Math.abs(target - entry);
+    const rr = riskPoints > 0 ? parseFloat((rewardPoints / riskPoints).toFixed(2)) : 0;
+
+    const trade = {
+      id: Date.now().toString(),
+      direction: form.direction,
+      entry, stop, target, rr,
+      levelType: form.levelType,
+      setupNotes: form.setupNotes,
+      result: 'pending',
+      created: new Date().toISOString(),
+      resolved: null,
+    };
+
+    setTrades(prev => [trade, ...prev]);
+    setForm({ direction: 'long', entry: '', stop: '', target: '', levelType: '', setupNotes: '' });
+    setShowForm(false);
+  };
+
+  // Resolve a trade
+  const resolveTrade = (id, result) => {
+    setTrades(prev => prev.map(t => t.id === id ? { ...t, result, resolved: new Date().toISOString() } : t));
+  };
+
+  // Delete a trade
+  const deleteTrade = (id) => {
+    setTrades(prev => prev.filter(t => t.id !== id));
+  };
+
+  // Clear all
+  const clearAll = () => {
+    if (confirm('Clear all paper trades?')) { setTrades([]); }
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/30 shrink-0 bg-zinc-900/50">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Paper Trading</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/30">PRACTICE</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setShowStats(!showStats)} className={cn('text-[9px] px-1.5 py-0.5 rounded border transition-colors',
+            showStats ? 'text-teal-400 bg-teal-500/10 border-teal-500/30' : 'text-zinc-500 border-zinc-700 hover:text-zinc-300')}>
+            Stats
+          </button>
+          {trades.length > 0 && <button onClick={clearAll} className="text-[9px] text-zinc-600 hover:text-red-400 px-1">Clear</button>}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+        {/* Stats bar */}
+        {showStats && stats.completed > 0 && (
+          <div className="grid grid-cols-4 gap-1 p-2 bg-zinc-900/50 rounded border border-zinc-800">
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Win Rate</div>
+              <div className={cn('text-sm font-bold tabular-nums', stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400')}>{stats.winRate}%</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">W/L</div>
+              <div className="text-sm font-bold tabular-nums text-zinc-300">{stats.wins}/{stats.losses}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Total R</div>
+              <div className={cn('text-sm font-bold tabular-nums', parseFloat(stats.totalR) >= 0 ? 'text-emerald-400' : 'text-red-400')}>{stats.totalR}R</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Trades</div>
+              <div className="text-sm font-bold tabular-nums text-zinc-300">{stats.completed}</div>
+            </div>
+          </div>
+        )}
+
+        {/* New trade button / form */}
+        {!showForm ? (
+          <button onClick={() => setShowForm(true)}
+            className="w-full py-2 rounded-md text-xs font-semibold bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 transition-all">
+            + New Paper Trade
+          </button>
+        ) : (
+          <div className="space-y-2 p-2.5 bg-zinc-900/50 rounded-lg border border-purple-500/20">
+            {/* Direction */}
+            <div className="flex gap-1">
+              <button onClick={() => setForm({ ...form, direction: 'long' })}
+                className={cn('flex-1 px-2 py-1.5 rounded text-[10px] font-medium border',
+                  form.direction === 'long' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700')}>
+                Long ▲
+              </button>
+              <button onClick={() => setForm({ ...form, direction: 'short' })}
+                className={cn('flex-1 px-2 py-1.5 rounded text-[10px] font-medium border',
+                  form.direction === 'short' ? 'bg-red-500/15 text-red-300 border-red-500/40' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700')}>
+                Short ▼
+              </button>
+            </div>
+
+            {/* Entry / Stop / Target */}
+            <div className="grid grid-cols-3 gap-1">
+              <div>
+                <label className="text-[8px] text-zinc-500 uppercase">Entry</label>
+                <input type="number" step="0.01" value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })}
+                  placeholder={lastPrice > 0 ? lastPrice.toFixed(0) : '0'}
+                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+              </div>
+              <div>
+                <label className="text-[8px] text-zinc-500 uppercase">Stop</label>
+                <input type="number" step="0.01" value={form.stop} onChange={(e) => setForm({ ...form, stop: e.target.value })}
+                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+              </div>
+              <div>
+                <label className="text-[8px] text-zinc-500 uppercase">Target</label>
+                <input type="number" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}
+                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+              </div>
+            </div>
+
+            {/* R:R preview */}
+            {form.entry && form.stop && form.target && (
+              <div className="flex justify-between text-[9px] px-1">
+                <span className="text-zinc-500">R:R</span>
+                <span className="text-zinc-300 tabular-nums font-mono">
+                  1:{(Math.abs(parseFloat(form.target) - parseFloat(form.entry)) / Math.abs(parseFloat(form.entry) - parseFloat(form.stop))).toFixed(1)}
+                </span>
+              </div>
+            )}
+
+            {/* Setup type */}
+            <select value={form.levelType} onChange={(e) => setForm({ ...form, levelType: e.target.value })}
+              className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 focus:outline-none focus:border-purple-400/50">
+              <option value="">Setup type (optional)</option>
+              <option value="SSL Sweep">SSL Sweep + Long</option>
+              <option value="BSL Sweep">BSL Sweep + Short</option>
+              <option value="Equal Lows Sweep">Equal Lows Sweep</option>
+              <option value="Equal Highs Sweep">Equal Highs Sweep</option>
+              <option value="PDL Sweep">PDL Sweep</option>
+              <option value="PDH Sweep">PDH Sweep</option>
+              <option value="FVG Entry">FVG Entry</option>
+              <option value="AVWAP Pullback">AVWAP Pullback</option>
+              <option value="Other">Other</option>
+            </select>
+
+            {/* Notes */}
+            <input value={form.setupNotes} onChange={(e) => setForm({ ...form, setupNotes: e.target.value })}
+              placeholder="Quick note: what did you see?"
+              className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 focus:outline-none focus:border-purple-400/50" />
+
+            {/* Actions */}
+            <div className="flex gap-1">
+              <button onClick={handleSubmit} disabled={!form.entry || !form.stop || !form.target}
+                className="flex-1 py-1.5 rounded text-[10px] font-semibold bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
+                📝 Paper Execute
+              </button>
+              <button onClick={() => setShowForm(false)} className="px-3 py-1.5 rounded text-[10px] text-zinc-500 border border-zinc-700 hover:text-zinc-300">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pending trades */}
+        {trades.filter(t => t.result === 'pending').length > 0 && (
+          <div className="space-y-1.5">
+            <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Pending</span>
+            {trades.filter(t => t.result === 'pending').map(trade => (
+              <div key={trade.id} className="p-2 rounded border border-amber-500/20 bg-amber-500/5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={cn('text-[10px] font-bold', trade.direction === 'long' ? 'text-emerald-400' : 'text-red-400')}>
+                      {trade.direction === 'long' ? '▲ LONG' : '▼ SHORT'}
+                    </span>
+                    {trade.levelType && <span className="text-[9px] text-zinc-500">{trade.levelType}</span>}
+                  </div>
+                  <span className="text-[9px] text-zinc-600">{new Date(trade.created).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <div className="flex items-center gap-3 text-[9px] tabular-nums font-mono">
+                  <span className="text-zinc-400">E: {trade.entry.toFixed(2)}</span>
+                  <span className="text-red-400/70">S: {trade.stop.toFixed(2)}</span>
+                  <span className="text-emerald-400/70">T: {trade.target.toFixed(2)}</span>
+                  <span className="text-zinc-500">R:R 1:{trade.rr}</span>
+                </div>
+                {trade.setupNotes && <p className="text-[9px] text-zinc-500 italic">{trade.setupNotes}</p>}
+                {/* Resolve buttons */}
+                <div className="flex gap-1 pt-1">
+                  <button onClick={() => resolveTrade(trade.id, 'target_hit')} className="flex-1 py-1 rounded text-[8px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20">Target ✓</button>
+                  <button onClick={() => resolveTrade(trade.id, 'stop_hit')} className="flex-1 py-1 rounded text-[8px] font-medium bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20">Stop ✗</button>
+                  <button onClick={() => resolveTrade(trade.id, 'vwap_break')} className="flex-1 py-1 rounded text-[8px] font-medium bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20">VWAP ✗</button>
+                  <button onClick={() => resolveTrade(trade.id, 'breakeven')} className="py-1 px-1.5 rounded text-[8px] text-zinc-500 border border-zinc-700 hover:text-zinc-300">BE</button>
+                  <button onClick={() => deleteTrade(trade.id)} className="py-1 px-1.5 rounded text-[8px] text-zinc-600 hover:text-red-400">✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Completed trades */}
+        {trades.filter(t => t.result !== 'pending').length > 0 && (
+          <div className="space-y-1.5">
+            <span className="text-[9px] text-zinc-500 uppercase tracking-wider">History ({trades.filter(t => t.result !== 'pending').length})</span>
+            {trades.filter(t => t.result !== 'pending').slice(0, 10).map(trade => {
+              const resultConfig = RESULTS.find(r => r.value === trade.result) || RESULTS[0];
+              return (
+                <div key={trade.id} className={cn('flex items-center gap-2 px-2 py-1.5 rounded border', resultConfig.bg)}>
+                  <span className={cn('text-[9px] font-bold', trade.direction === 'long' ? 'text-emerald-400' : 'text-red-400')}>
+                    {trade.direction === 'long' ? '▲' : '▼'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] tabular-nums font-mono text-zinc-400">{trade.entry.toFixed(1)}</span>
+                      <span className={cn('text-[9px] font-medium', resultConfig.color)}>{resultConfig.label}</span>
+                      {trade.result === 'target_hit' && <span className="text-[9px] text-emerald-400 tabular-nums">+{trade.rr}R</span>}
+                      {(trade.result === 'stop_hit' || trade.result === 'vwap_break') && <span className="text-[9px] text-red-400 tabular-nums">-1R</span>}
+                    </div>
+                    {trade.levelType && <span className="text-[8px] text-zinc-600">{trade.levelType}</span>}
+                  </div>
+                  <button onClick={() => deleteTrade(trade.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-[9px]">✕</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {trades.length === 0 && !showForm && (
+          <div className="text-center py-6 space-y-2">
+            <div className="text-2xl">📝</div>
+            <p className="text-[10px] text-zinc-500">Practice your execution without risk.</p>
+            <p className="text-[9px] text-zinc-600">Same workflow: identify sweep → confirm displacement → set entry/stop/target → track result.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

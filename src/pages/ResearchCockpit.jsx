@@ -9,12 +9,13 @@ import DrawIndicator from '@/components/trading/DrawIndicator';
 import FibCalculator from '@/components/trading/FibCalculator';
 import SessionNotes from '@/components/trading/SessionNotes';
 import TradingPanel from '@/components/trading/TradingPanel';
+import PaperTradePanel from '@/components/trading/PaperTradePanel';
 import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
 import BiasScanner from '@/components/trading/BiasScanner';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
-  const [rightPanel, setRightPanel] = useState('ladder'); // 'ladder' | 'trading'
+  const [rightPanel, setRightPanel] = useState('ladder'); // 'ladder' | 'trading' | 'paper'
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
@@ -66,6 +67,17 @@ export default function ResearchCockpit() {
             >
               ⚡ Trade
             </button>
+            <button
+              onClick={() => setRightPanel('paper')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
+                rightPanel === 'paper'
+                  ? 'text-purple-400 border-purple-400 bg-purple-500/5'
+                  : 'text-slate-500 border-transparent hover:text-slate-300'
+              )}
+            >
+              📝 Paper
+            </button>
           </div>
 
           {/* Panel Content */}
@@ -100,8 +112,10 @@ export default function ResearchCockpit() {
                   <SessionNotes />
                 </div>
               </>
-            ) : (
+            ) : rightPanel === 'trading' ? (
               <TradingPanel />
+            ) : (
+              <PaperTradePanel />
             )}
           </div>
         </div>
