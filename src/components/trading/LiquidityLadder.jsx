@@ -63,18 +63,18 @@ function Rung({ level, percent }) {
           </span>
         </div>
 
-        {/* Hover tooltip */}
-        <div className="absolute left-full ml-2 hidden group-hover:flex items-center z-50">
-          <div className="bg-terminal-surface border border-terminal-border rounded px-3 py-2 shadow-xl max-w-[300px]">
+        {/* Hover tooltip — shows below the rung */}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 hidden group-hover:block z-50">
+          <div className="bg-terminal-surface border border-terminal-border rounded px-3 py-2 shadow-xl w-[280px]">
             <div className="text-[10px] text-slate-300 font-medium">{level.name || level.pool_type}</div>
             <div className="text-[9px] text-slate-500 mt-0.5">
-              {level.side} • {level.pool_type} • {level.timeframe}
+              {level.side} • {level.pool_type} • {level.timeframe} • {level.price.toFixed(2)}
             </div>
             <div className="text-[9px] text-slate-500">
               Strength: {strength.label} • Status: {level.sweep_status}
             </div>
             {level.notes && (
-              <div className="text-[9px] text-slate-400 mt-1 italic leading-relaxed break-words whitespace-normal">{level.notes}</div>
+              <div className="text-[9px] text-slate-400 mt-1.5 italic leading-relaxed break-words whitespace-normal border-t border-terminal-border pt-1.5">{level.notes}</div>
             )}
           </div>
         </div>
@@ -181,7 +181,7 @@ export default function LiquidityLadder() {
   }
 
   return (
-    <div className="h-full relative overflow-hidden">
+    <div className="h-full relative overflow-visible">
       {/* Scale labels (top & bottom) */}
       <div className="absolute top-1 left-0 right-0 flex justify-between px-1 z-10">
         <span className="text-[9px] text-slate-600 tabular-nums font-mono">
