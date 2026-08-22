@@ -10,6 +10,7 @@ import FibCalculator from '@/components/trading/FibCalculator';
 import SessionNotes from '@/components/trading/SessionNotes';
 import TradingPanel from '@/components/trading/TradingPanel';
 import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
+import LevelScanner from '@/components/trading/LevelScanner';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -22,8 +23,11 @@ export default function ResearchCockpit() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row md:min-h-0 overflow-y-auto md:overflow-hidden">
-        {/* LEFT RAIL — Level List, Fib Calculator */}
+        {/* LEFT RAIL — Scanner, Level List, Fib Calculator */}
         <div className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto">
+          <div className="shrink-0">
+            <LevelScanner />
+          </div>
           <div className="flex-1 md:min-h-0">
             <LiquidityLevelList />
           </div>
