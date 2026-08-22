@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { useResearch } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
+const FMP_KEY_STORAGE = 'lh_fmp_key';
+function getFmpKey() { return localStorage.getItem(FMP_KEY_STORAGE) || ''; }
+function saveFmpKey(key) { localStorage.setItem(FMP_KEY_STORAGE, key); }
+
 /**
  * Directional Bias Scanner
  * 
@@ -176,6 +180,154 @@ export default function BiasScanner() {
             {result.bias === 'SSL' && result.confidence === 'moderate' && 'More untouched liquidity below. Slight downside draw.'}
             {result.bias === 'neutral' && 'Liquidity balanced. No clear draw — wait for structure.'}
           </p>
+        </div>
+      )}
+
+      {/* FMP Cross-Check */}
+      <FMPCrossCheck localBias={result} />
+    </div>
+  );
+}
+
+// ─── FMP Market Data Cross-Check ──────────────────────────────────────────────
+
+function FMPCrossCheck({ localBias }) {
+  const [fmpKey, setFmpKey] = useState(getFmpKey());
+  const [showSetup, setShowSetup] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [marketResult, setMarketResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const handleSaveKey = () => { saveFmpKey(fmpKey.trim()); setShowSetup(false); };
+
+  const handleCrossCheck = async () => {
+    const key = getFmpKey();
+    if (!key) { setShowSetup(true); return; }
+
+    setScanning(true);
+    setError(null);
+
+    try {
+      // Fetch 5-min intraday data for ^NDX (Nasdaq 100 index)
+      const url = `https://financialmodelingprep.com/api/v3/historical-chart/5min/%5ENDX?apikey=${key}`;
+      const response = await fetch(url);
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+
+      if (!data || data.length === 0) throw new Error('No data returned');
+
+      // Data comes newest-first, reverse for analysis
+      const bars = data.slice(0, 500).reverse().map(d => ({
+        high: d.high, low: d.low, close: d.close, open: d.open, date: d.date,
+      }));
+
+      const currentPrice = bars[bars.length - 1].close;
+
+      // Detect swing highs/lows from market data
+      const swingHighs = [];
+      const swingLows = [];
+      const lookback = 7;
+
+      for (let i = lookback; i < bars.length - lookback; i++) {
+        let isHigh = true, isLow = true;
+        for (let j = i - lookback; j <= i + lookback; j++) {
+          if (j === i) continue;
+          if (bars[j].high >= bars[i].high) isHigh = false;
+          if (bars[j].low <= bars[i].low) isLow = false;
+        }
+        if (isHigh) swingHighs.push(bars[i].high);
+        if (isLow) swingLows.push(bars[i].low);
+      }
+
+      const bslAbove = swingHighs.filter(p => p > currentPrice);
+      const sslBelow = swingLows.filter(p => p < currentPrice);
+
+      // Simple bias from market structure
+      let marketBias;
+      if (bslAbove.length > sslBelow.length + 1) marketBias = 'BSL';
+      else if (sslBelow.length > bslAbove.length + 1) marketBias = 'SSL';
+      else marketBias = 'neutral';
+
+      // Does it agree with local bias?
+      const agrees = localBias && localBias.bias === marketBias;
+
+      setMarketResult({
+        bias: marketBias,
+        bslAbove: bslAbove.length,
+        sslBelow: sslBelow.length,
+        currentPrice,
+        agrees,
+        nearestBSL: bslAbove.length > 0 ? Math.min(...bslAbove) : null,
+        nearestSSL: sslBelow.length > 0 ? Math.max(...sslBelow) : null,
+      });
+
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5 pt-2 border-t border-zinc-800/50">
+      {/* Setup */}
+      {showSetup && (
+        <div className="space-y-1 p-2 bg-terminal-bg rounded border border-terminal-border">
+          <label className="text-[9px] text-slate-500">FMP API Key (free at financialmodelingprep.com)</label>
+          <div className="flex gap-1">
+            <input type="text" value={fmpKey} onChange={(e) => setFmpKey(e.target.value)}
+              placeholder="Your FMP API key" className="flex-1 h-6 px-2 bg-zinc-900 border border-zinc-800 rounded text-[9px] text-zinc-300 focus:outline-none focus:border-teal-400/50" />
+            <button onClick={handleSaveKey} disabled={!fmpKey.trim()}
+              className="px-2 h-6 rounded text-[9px] bg-teal-500/10 border border-teal-500/30 text-teal-400 disabled:opacity-50">Save</button>
+          </div>
+        </div>
+      )}
+
+      {/* Cross-check button */}
+      <button onClick={handleCrossCheck} disabled={scanning}
+        className={cn('w-full py-1 rounded text-[9px] font-medium transition-all border',
+          scanning ? 'text-blue-400 border-blue-500/20 animate-pulse' :
+          'text-slate-500 border-zinc-800 hover:text-blue-400 hover:border-blue-500/30')}>
+        {scanning ? '⏳ Checking market...' : '🔄 Cross-check with NAS100 data (FMP)'}
+      </button>
+
+      {error && <p className="text-[9px] text-red-400">{error}</p>}
+
+      {/* Market result */}
+      {marketResult && (
+        <div className={cn('p-2 rounded border space-y-1',
+          marketResult.agrees ? 'bg-emerald-500/5 border-emerald-500/20' :
+          marketResult.agrees === false ? 'bg-amber-500/5 border-amber-500/20' :
+          'bg-zinc-800/50 border-zinc-700')}>
+
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] text-slate-500">Market structure says:</span>
+            <span className={cn('text-[10px] font-bold',
+              marketResult.bias === 'BSL' ? 'text-cyan-400' : marketResult.bias === 'SSL' ? 'text-orange-400' : 'text-slate-400')}>
+              {marketResult.bias === 'BSL' ? '▲ BSL' : marketResult.bias === 'SSL' ? '▼ SSL' : '— Neutral'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-[9px]">
+            <span className="text-slate-500">Swing Highs above: <span className="text-cyan-400">{marketResult.bslAbove}</span></span>
+            <span className="text-slate-500">Swing Lows below: <span className="text-orange-400">{marketResult.sslBelow}</span></span>
+          </div>
+
+          {marketResult.nearestBSL && (
+            <div className="text-[9px] text-slate-500">Nearest BSL: <span className="text-cyan-300 font-mono">{marketResult.nearestBSL.toFixed(2)}</span></div>
+          )}
+          {marketResult.nearestSSL && (
+            <div className="text-[9px] text-slate-500">Nearest SSL: <span className="text-orange-300 font-mono">{marketResult.nearestSSL.toFixed(2)}</span></div>
+          )}
+
+          {/* Agreement indicator */}
+          {localBias && (
+            <div className={cn('text-center text-[10px] font-bold pt-1',
+              marketResult.agrees ? 'text-emerald-400' : 'text-amber-400')}>
+              {marketResult.agrees ? '✓ CONFIRMS your bias' : '⚠ CONFLICTS with your bias — review levels'}
+            </div>
+          )}
         </div>
       )}
     </div>
