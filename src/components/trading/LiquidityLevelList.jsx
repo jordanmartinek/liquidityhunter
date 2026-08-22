@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, X, Droplets, Mic, MicOff } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
+import { cn } from '@/lib/utils';
 import { POOL_TYPES, LIQUIDITY_SIDES, TIMEFRAMES, SWEEP_STATUSES, STRENGTH_LEVELS, getStrengthConfig } from '@/lib/constants';
 
 /**
@@ -136,6 +137,9 @@ export default function LiquidityLevelList() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [voiceParsed, setVoiceParsed] = useState(null);
+  const [avwapPlans, setAvwapPlans] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('lh_avwap_plans')) || []; } catch { return []; }
+  });
   const [form, setForm] = useState({
     name: '',
     price: '',
@@ -243,6 +247,31 @@ export default function LiquidityLevelList() {
   const cancelEdit = () => {
     setEditingId(null);
     setEditForm(null);
+  };
+
+  // AVWAP: check if level has a linked plan
+  const hasAvwapPlan = (levelId) => avwapPlans.some(p => p.linkedLevelId === levelId);
+
+  // AVWAP: toggle plan for a level
+  const toggleAvwapPlan = (level) => {
+    const existing = avwapPlans.find(p => p.linkedLevelId === level.id);
+    let updated;
+    if (existing) {
+      updated = avwapPlans.filter(p => p.id !== existing.id);
+    } else {
+      const newPlan = {
+        id: Date.now().toString(),
+        price: level.price,
+        direction: level.side === 'Buy-Side' ? 'short' : 'long', // Sweep BSL = short after, Sweep SSL = long after
+        note: `Auto-anchor on sweep of ${level.name || level.pool_type}`,
+        linkedLevelId: level.id,
+        status: 'planned',
+        created: new Date().toISOString(),
+      };
+      updated = [...avwapPlans, newPlan];
+    }
+    setAvwapPlans(updated);
+    localStorage.setItem('lh_avwap_plans', JSON.stringify(updated));
   };
 
   // Show levels for active timeframe
@@ -498,6 +527,19 @@ export default function LiquidityLevelList() {
                 status={level.sweep_status}
                 onCycle={() => cycleSweepStatus(level)}
               />
+
+              {/* AVWAP toggle */}
+              <button
+                onClick={() => toggleAvwapPlan(level)}
+                className={cn('text-[8px] px-1 py-0.5 rounded border transition-all',
+                  hasAvwapPlan(level.id)
+                    ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                    : 'opacity-0 group-hover:opacity-100 text-zinc-600 border-zinc-700 hover:text-purple-400 hover:border-purple-500/30'
+                )}
+                title={hasAvwapPlan(level.id) ? 'AVWAP planned — click to remove' : 'Plan AVWAP anchor on sweep'}
+              >
+                V
+              </button>
 
               {/* Edit */}
               <button

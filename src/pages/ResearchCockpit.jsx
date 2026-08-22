@@ -9,6 +9,7 @@ import DrawIndicator from '@/components/trading/DrawIndicator';
 import FibCalculator from '@/components/trading/FibCalculator';
 import SessionNotes from '@/components/trading/SessionNotes';
 import TradingPanel from '@/components/trading/TradingPanel';
+import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -81,6 +82,11 @@ export default function ResearchCockpit() {
                 {/* Liquidity Ladder */}
                 <div className="flex-1 min-h-[200px] md:min-h-0">
                   <LiquidityLadder />
+                </div>
+
+                {/* AVWAP Plans */}
+                <div className="shrink-0 p-2 border-t border-terminal-border">
+                  <AVWAPPlanner />
                 </div>
 
                 {/* Session Notes */}
