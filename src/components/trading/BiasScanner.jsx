@@ -19,8 +19,8 @@ const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/NQ%3DF?int
 
 // Multiple CORS proxies as fallbacks
 const CORS_PROXIES = [
+  (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
   (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
 ];
 
@@ -148,8 +148,21 @@ export default function BiasScanner() {
 
       if (!response) throw new Error(lastErr || 'All proxies failed');
 
-      const data = await response.json();
-      const chartData = data?.chart?.result?.[0];
+      // allorigins.win wraps response in { contents: "..." }
+      let rawData;
+      const text = await response.text();
+      try {
+        const wrapped = JSON.parse(text);
+        if (wrapped.contents) {
+          rawData = JSON.parse(wrapped.contents);
+        } else {
+          rawData = wrapped;
+        }
+      } catch {
+        rawData = JSON.parse(text);
+      }
+
+      const chartData = rawData?.chart?.result?.[0];
       if (!chartData) throw new Error('No chart data returned');
 
       const timestamps = chartData.timestamp;
