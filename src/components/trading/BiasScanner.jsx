@@ -184,14 +184,14 @@ export default function BiasScanner() {
       )}
 
       {/* FMP Cross-Check */}
-      <FMPCrossCheck localBias={result} />
+      <FMPCrossCheck localBias={result} lastPrice={lastPrice} />
     </div>
   );
 }
 
 // ─── FMP Market Data Cross-Check ──────────────────────────────────────────────
 
-function FMPCrossCheck({ localBias }) {
+function FMPCrossCheck({ localBias, lastPrice }) {
   const [fmpKey, setFmpKey] = useState(getFmpKey());
   const [showSetup, setShowSetup] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -208,21 +208,29 @@ function FMPCrossCheck({ localBias }) {
     setError(null);
 
     try {
-      // Fetch 5-min intraday data for ^NDX (Nasdaq 100 index)
-      const url = `https://financialmodelingprep.com/api/v3/historical-chart/5min/%5ENDX?apikey=${key}`;
+      // Try QQQ (ETF) — always available on free plan
+      // Then scale prices to NAS100 range using lastPrice if available
+      const url = `https://financialmodelingprep.com/stable/historical-chart/5min?symbol=QQQ&apikey=${key}`;
       const response = await fetch(url);
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
+      if (!response.ok) {
+        // Fallback to legacy endpoint
+        const legacyUrl = `https://financialmodelingprep.com/api/v3/historical-chart/5min/QQQ?apikey=${key}`;
+        const legacyRes = await fetch(legacyUrl);
+        if (!legacyRes.ok) throw new Error(`HTTP ${legacyRes.status} — check your FMP API key`);
+        var data = await legacyRes.json();
+      } else {
+        var data = await response.json();
+      }
 
       if (!data || data.length === 0) throw new Error('No data returned');
 
       // Data comes newest-first, reverse for analysis
       const bars = data.slice(0, 500).reverse().map(d => ({
-        high: d.high, low: d.low, close: d.close, open: d.open, date: d.date,
+        high: d.high, low: d.low, close: d.close, open: d.open,
       }));
 
-      const currentPrice = bars[bars.length - 1].close;
+      const qqqPrice = bars[bars.length - 1].close;
 
       // Detect swing highs/lows from market data
       const swingHighs = [];
@@ -240,8 +248,8 @@ function FMPCrossCheck({ localBias }) {
         if (isLow) swingLows.push(bars[i].low);
       }
 
-      const bslAbove = swingHighs.filter(p => p > currentPrice);
-      const sslBelow = swingLows.filter(p => p < currentPrice);
+      const bslAbove = swingHighs.filter(p => p > qqqPrice);
+      const sslBelow = swingLows.filter(p => p < qqqPrice);
 
       // Simple bias from market structure
       let marketBias;
@@ -252,14 +260,18 @@ function FMPCrossCheck({ localBias }) {
       // Does it agree with local bias?
       const agrees = localBias && localBias.bias === marketBias;
 
+      // Scale nearest targets to NAS100 if lastPrice available
+      const scale = (lastPrice && lastPrice > 1000 && qqqPrice > 0) ? lastPrice / qqqPrice : 1;
+
       setMarketResult({
         bias: marketBias,
         bslAbove: bslAbove.length,
         sslBelow: sslBelow.length,
-        currentPrice,
+        currentPrice: qqqPrice,
         agrees,
-        nearestBSL: bslAbove.length > 0 ? Math.min(...bslAbove) : null,
-        nearestSSL: sslBelow.length > 0 ? Math.max(...sslBelow) : null,
+        nearestBSL: bslAbove.length > 0 ? Math.min(...bslAbove) * scale : null,
+        nearestSSL: sslBelow.length > 0 ? Math.max(...sslBelow) * scale : null,
+        scaled: scale !== 1,
       });
 
     } catch (e) {
