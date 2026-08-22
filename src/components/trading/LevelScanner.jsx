@@ -4,7 +4,7 @@ import { getStrengthConfig } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
 const TWELVE_DATA_URL = 'https://api.twelvedata.com/time_series';
-const SYMBOL = 'NDX'; // Nasdaq 100 index — matches PEPPERSTONE:NAS100 on TradingView
+const SYMBOL = 'QQQ'; // QQQ ETF tracks Nasdaq 100 — free on all Twelve Data plans
 
 const STORAGE_KEY_API = 'lh_twelvedata_key';
 
@@ -176,13 +176,14 @@ function runDetection(bars) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function LevelScanner() {
-  const { addLevel, levels } = useResearch();
+  const { addLevel, levels, lastPrice } = useResearch();
   const [apiKey, setApiKey] = useState(getApiKey());
   const [showSettings, setShowSettings] = useState(!getApiKey());
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState([]);
   const [error, setError] = useState(null);
   const [addedIds, setAddedIds] = useState(new Set());
+  const [useScaling, setUseScaling] = useState(true); // Convert QQQ → NAS100 scale
 
   const handleSaveKey = () => {
     saveApiKey(apiKey.trim());
@@ -230,7 +231,19 @@ export default function LevelScanner() {
 
       // Run detection
       const detected = runDetection(bars);
-      setResults(detected);
+
+      // Scale QQQ levels to NAS100 if scaling enabled and we have a reference price
+      if (useScaling && lastPrice > 0) {
+        const qqqLastPrice = bars[bars.length - 1].close;
+        const scaleFactor = lastPrice / qqqLastPrice; // e.g. 21000 / 500 = 42
+        const scaled = detected.map(level => ({
+          ...level,
+          price: parseFloat((level.price * scaleFactor).toFixed(2)),
+        }));
+        setResults(scaled);
+      } else {
+        setResults(detected);
+      }
 
     } catch (e) {
       setError(e.message);
@@ -300,6 +313,18 @@ export default function LevelScanner() {
             'bg-teal-500/10 border-teal-500/30 text-teal-400 hover:bg-teal-500/20 disabled:opacity-50 disabled:cursor-not-allowed')}>
           {scanning ? '⏳ Scanning NAS100...' : '🔍 Scan NAS100 for Levels'}
         </button>
+
+        {/* Scaling note */}
+        {lastPrice > 0 && (
+          <div className="flex items-center justify-between text-[9px]">
+            <span className="text-slate-600">QQQ → NAS100 scaling ({(lastPrice / 500).toFixed(1)}x)</span>
+            <button onClick={() => setUseScaling(!useScaling)}
+              className={cn('px-1.5 py-0.5 rounded border transition-colors',
+                useScaling ? 'text-teal-400 border-teal-500/30 bg-teal-500/10' : 'text-slate-500 border-zinc-700')}>
+              {useScaling ? 'ON' : 'OFF'}
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
