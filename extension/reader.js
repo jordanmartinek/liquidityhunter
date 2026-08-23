@@ -7,39 +7,80 @@
 const POLL_INTERVAL = 1000;
 
 function extractPrice() {
+  // TradingView renders the price axis on canvas — can't read that.
+  // But the price IS available as text in several other DOM locations:
+  
   const selectors = [
+    // Symbol info header — shows OHLC values, last price is in here
+    '.chart-widget .price-axis .last-price-label',
+    // The legend/header bar values (Open, High, Low, Close)
+    '.valuesAdditionalWrapper span',
+    '.legendMainValue',
+    // Header ticker price on the full site
+    '.tv-symbol-price-quote__value .js-symbol-last',
     '.tv-symbol-price-quote__value',
-    '[data-testid="price-value"]',
-    '.js-header-ticker-price',
-    '.quote-header-info .last-JWoJqCpY',
-    '[class*="lastPrice"]',
-    '[class*="last-"][class*="price"]',
-    '.price-axis__last-price .last-price-label__value',
+    // Chart status line values
+    '.chart-status-line span',
+    // The data window values
+    '.chart-data-window .price',
+    // Newer TV layouts — inline values
+    '[data-name="legend-source-item"] [class*="valuesWrapper"] span',
+    '[data-name="legend-series-item"] [class*="value"]',
+    // The close value in the OHLC legend (usually the 4th value)
+    '.chart-widget [class*="legendMainValue"]',
+    '[class*="headerWrap"] [class*="last"]',
+    '[class*="highlight"] [class*="price"]',
+    // Compact header
+    '[class*="symbolTitle"] + [class*="price"]',
+    '[class*="quote"] [class*="last"]',
+    // Try all spans that might contain a price-like number
+    '.layout__area--center [class*="value"]',
+    '.layout__area--center [class*="price"]',
   ];
 
   for (const selector of selectors) {
-    const elements = document.querySelectorAll(selector);
-    for (const el of elements) {
-      const text = el.textContent.trim();
-      const cleaned = text.replace(/[,$\s]/g, '');
-      const price = parseFloat(cleaned);
-      if (price > 100 && price < 100000 && !isNaN(price)) {
-        return price;
+    try {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        const text = el.textContent.trim();
+        const cleaned = text.replace(/[,$\s]/g, '');
+        const price = parseFloat(cleaned);
+        if (price > 1000 && price < 50000 && !isNaN(price)) {
+          return price;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Brute force: find ANY element with a 5-digit number that looks like NAS100 price
+  // Scan visible text nodes for price-like patterns
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
+
+  const priceRegex = /^\s*\d{4,5}\.\d{1,2}\s*$/;
+  let node;
+  const candidates = [];
+  
+  while (node = walker.nextNode()) {
+    const text = node.textContent.trim();
+    if (priceRegex.test(text)) {
+      const price = parseFloat(text);
+      // NAS100 is typically between 15000-35000
+      if (price > 15000 && price < 35000) {
+        candidates.push(price);
       }
     }
   }
 
-  // Fallback: scan for price-like elements
-  const allElements = document.querySelectorAll('[class*="price"], [class*="Price"], [class*="last"], [class*="Last"]');
-  for (const el of allElements) {
-    if (el.children.length > 2) continue;
-    const text = el.textContent.trim();
-    if (text.length > 12) continue;
-    const cleaned = text.replace(/[,$\s]/g, '');
-    const price = parseFloat(cleaned);
-    if (price > 1000 && price < 50000 && !isNaN(price)) {
-      return price;
-    }
+  // Return the most frequently occurring price (likely the "last" price shown multiple times)
+  if (candidates.length > 0) {
+    const counts = {};
+    candidates.forEach(p => { const key = p.toFixed(2); counts[key] = (counts[key] || 0) + 1; });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return parseFloat(sorted[0][0]);
   }
 
   return null;
