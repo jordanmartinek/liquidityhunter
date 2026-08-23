@@ -12,6 +12,7 @@ import TradingPanel from '@/components/trading/TradingPanel';
 import PaperTradePanel from '@/components/trading/PaperTradePanel';
 import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
 import BiasScanner from '@/components/trading/BiasScanner';
+import LiveAlerts from '@/components/trading/LiveAlerts';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -22,6 +23,11 @@ export default function ResearchCockpit() {
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
       {/* Top Bar */}
       <TopBar />
+
+      {/* Live Alerts Bar — always visible when bridge is active */}
+      <div className="shrink-0 px-3 py-1 border-b border-terminal-border bg-terminal-bg">
+        <LiveAlerts />
+      </div>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row md:min-h-0 overflow-y-auto md:overflow-hidden">

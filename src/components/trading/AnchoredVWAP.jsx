@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Mic, MicOff, X } from 'lucide-react';
 import { useVoiceInput } from '@/lib/useVoiceInput';
+import { useResearch } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 /**
@@ -21,6 +22,7 @@ function parsePrice(text) {
 }
 
 export default function AnchoredVWAP() {
+  const { lastPrice, isLive } = useResearch();
   const [active, setActive] = useState(false);
   const [direction, setDirection] = useState('long'); // 'long' | 'short'
   const [anchorPrice, setAnchorPrice] = useState('');
@@ -31,6 +33,23 @@ export default function AnchoredVWAP() {
   const [newTickPrice, setNewTickPrice] = useState('');
   const [newTickVolume, setNewTickVolume] = useState('');
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
+
+  // ─── Auto-update from live price bridge ─────────────────────────
+  const lastLivePriceRef = React.useRef(0);
+  useEffect(() => {
+    if (!active || !isLive || lastPrice <= 0) return;
+    // Only add a tick if price actually changed (avoid duplicates)
+    if (lastPrice !== lastLivePriceRef.current) {
+      lastLivePriceRef.current = lastPrice;
+      setCurrentPrice(lastPrice);
+      // Add a tick every 5 seconds (not every 1s — too noisy)
+      const shouldAddTick = ticks.length === 0 || 
+        (Date.now() - (ticks[ticks.length - 1]?.time || 0)) > 5000;
+      if (shouldAddTick) {
+        setTicks(prev => [...prev, { price: lastPrice, volume: 1000, time: Date.now() }]);
+      }
+    }
+  }, [lastPrice, isLive, active]);
 
   // Calculate running VWAP
   const vwap = React.useMemo(() => {
@@ -119,7 +138,10 @@ export default function AnchoredVWAP() {
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Anchored VWAP</span>
           {active && !invalidated && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/30 font-medium">ACTIVE</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/30 font-medium flex items-center gap-1">
+              {isLive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+              {isLive ? 'AUTO' : 'ACTIVE'}
+            </span>
           )}
           {invalidated && (
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/30 font-medium animate-pulse">INVALIDATED</span>
