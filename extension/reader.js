@@ -7,80 +7,46 @@
 const POLL_INTERVAL = 1000;
 
 function extractPrice() {
-  // TradingView renders the price axis on canvas — can't read that.
-  // But the price IS available as text in several other DOM locations:
-  
-  const selectors = [
-    // Symbol info header — shows OHLC values, last price is in here
-    '.chart-widget .price-axis .last-price-label',
-    // The legend/header bar values (Open, High, Low, Close)
-    '.valuesAdditionalWrapper span',
-    '.legendMainValue',
-    // Header ticker price on the full site
-    '.tv-symbol-price-quote__value .js-symbol-last',
-    '.tv-symbol-price-quote__value',
-    // Chart status line values
-    '.chart-status-line span',
-    // The data window values
-    '.chart-data-window .price',
-    // Newer TV layouts — inline values
-    '[data-name="legend-source-item"] [class*="valuesWrapper"] span',
-    '[data-name="legend-series-item"] [class*="value"]',
-    // The close value in the OHLC legend (usually the 4th value)
-    '.chart-widget [class*="legendMainValue"]',
-    '[class*="headerWrap"] [class*="last"]',
-    '[class*="highlight"] [class*="price"]',
-    // Compact header
-    '[class*="symbolTitle"] + [class*="price"]',
-    '[class*="quote"] [class*="last"]',
-    // Try all spans that might contain a price-like number
-    '.layout__area--center [class*="value"]',
-    '.layout__area--center [class*="price"]',
-  ];
-
-  for (const selector of selectors) {
-    try {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        const text = el.textContent.trim();
-        const cleaned = text.replace(/[,$\s]/g, '');
-        const price = parseFloat(cleaned);
-        if (price > 1000 && price < 50000 && !isNaN(price)) {
-          return price;
-        }
-      }
-    } catch (e) {}
+  // Primary: TradingView OHLC legend values (class contains 'valueValue')
+  const legendValues = document.querySelectorAll('[class*="valueValue"]');
+  if (legendValues.length >= 4) {
+    // The 4th value is typically the Close price (O, H, L, C)
+    const closeText = legendValues[3].textContent.trim().replace(/[,\s]/g, '');
+    const closePrice = parseFloat(closeText);
+    if (closePrice > 1000 && closePrice < 50000 && !isNaN(closePrice)) {
+      return closePrice;
+    }
   }
-
-  // Brute force: find ANY element with a 5-digit number that looks like NAS100 price
-  // Scan visible text nodes for price-like patterns
-  const walker = document.createTreeWalker(
-    document.body,
-    NodeFilter.SHOW_TEXT,
-    null
-  );
-
-  const priceRegex = /^\s*\d{4,5}\.\d{1,2}\s*$/;
-  let node;
-  const candidates = [];
-  
-  while (node = walker.nextNode()) {
-    const text = node.textContent.trim();
-    if (priceRegex.test(text)) {
-      const price = parseFloat(text);
-      // NAS100 is typically between 15000-35000
-      if (price > 15000 && price < 35000) {
-        candidates.push(price);
-      }
+  // Fallback: try first valid value from legend
+  for (const el of legendValues) {
+    const text = el.textContent.trim().replace(/[,\s]/g, '');
+    const price = parseFloat(text);
+    if (price > 1000 && price < 50000 && !isNaN(price)) {
+      return price;
     }
   }
 
-  // Return the most frequently occurring price (likely the "last" price shown multiple times)
-  if (candidates.length > 0) {
-    const counts = {};
-    candidates.forEach(p => { const key = p.toFixed(2); counts[key] = (counts[key] || 0) + 1; });
-    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    return parseFloat(sorted[0][0]);
+  // Secondary: button text with price (bid/ask buttons)
+  const buttons = document.querySelectorAll('[class*="buttonText"]');
+  for (const el of buttons) {
+    const text = el.textContent.trim().replace(/[,\s]/g, '');
+    const price = parseFloat(text);
+    if (price > 1000 && price < 50000 && !isNaN(price)) {
+      return price;
+    }
+  }
+
+  // Brute force fallback: walk all text nodes
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while (node = walker.nextNode()) {
+    const text = node.textContent.trim();
+    if (text.length > 12 || text.length < 5) continue;
+    const cleaned = text.replace(/[,\s]/g, '');
+    const price = parseFloat(cleaned);
+    if (price > 15000 && price < 35000 && !isNaN(price)) {
+      return price;
+    }
   }
 
   return null;
