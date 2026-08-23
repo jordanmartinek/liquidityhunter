@@ -23,6 +23,89 @@ const HTF_PATTERNS = [
   { id: 'neutral', label: 'Neutral / Inside', desc: 'Inside candle — no HH or LL. Wait for break.', color: 'text-slate-400', bg: 'bg-zinc-700/30 border-zinc-600', bias: 'neutral', conviction: 'none' },
 ];
 
+/**
+ * CandleVisual — tiny SVG showing the 2-candle pattern for each bias type
+ */
+function CandleVisual({ patternId }) {
+  const w = 48, h = 36;
+  
+  const patterns = {
+    strong_bull: (
+      // Candle 1: small bullish, Candle 2: larger bullish closing above C1 high
+      <svg width={w} height={h} viewBox="0 0 48 36">
+        {/* Candle 1 — small bullish */}
+        <line x1="12" y1="8" x2="12" y2="28" stroke="#52525b" strokeWidth="1"/>
+        <rect x="9" y="14" width="6" height="10" fill="#10b981" rx="0.5"/>
+        {/* Candle 2 — large bullish, closes above C1 high */}
+        <line x1="28" y1="4" x2="28" y2="26" stroke="#52525b" strokeWidth="1"/>
+        <rect x="25" y="6" width="6" height="16" fill="#10b981" rx="0.5"/>
+        {/* Arrow showing close above */}
+        <line x1="36" y1="14" x2="36" y2="6" stroke="#10b981" strokeWidth="1" markerEnd="url(#arr)"/>
+        <text x="38" y="10" fontSize="6" fill="#6b7280">HH</text>
+      </svg>
+    ),
+    weak_bull: (
+      // Candle 1: bullish, Candle 2: bullish but doesn't close above C1 high
+      <svg width={w} height={h} viewBox="0 0 48 36">
+        <line x1="12" y1="8" x2="12" y2="28" stroke="#52525b" strokeWidth="1"/>
+        <rect x="9" y="12" width="6" height="12" fill="#10b981" rx="0.5"/>
+        <line x1="28" y1="6" x2="28" y2="26" stroke="#52525b" strokeWidth="1"/>
+        <rect x="25" y="10" width="6" height="10" fill="#10b981" rx="0.5"/>
+        {/* Dashed line showing prev high not broken */}
+        <line x1="4" y1="12" x2="44" y2="12" stroke="#6b7280" strokeWidth="0.5" strokeDasharray="2 2"/>
+        <text x="36" y="16" fontSize="5" fill="#6b7280">fail</text>
+      </svg>
+    ),
+    strong_bear: (
+      // Candle 1: small bearish, Candle 2: large bearish closing below C1 low
+      <svg width={w} height={h} viewBox="0 0 48 36">
+        <line x1="12" y1="8" x2="12" y2="28" stroke="#52525b" strokeWidth="1"/>
+        <rect x="9" y="12" width="6" height="10" fill="#ef4444" rx="0.5"/>
+        <line x1="28" y1="10" x2="28" y2="32" stroke="#52525b" strokeWidth="1"/>
+        <rect x="25" y="14" width="6" height="16" fill="#ef4444" rx="0.5"/>
+        <text x="38" y="28" fontSize="6" fill="#6b7280">LL</text>
+      </svg>
+    ),
+    weak_bear: (
+      // Candle 1: bearish, Candle 2: bearish but doesn't close below C1 low
+      <svg width={w} height={h} viewBox="0 0 48 36">
+        <line x1="12" y1="8" x2="12" y2="28" stroke="#52525b" strokeWidth="1"/>
+        <rect x="9" y="12" width="6" height="12" fill="#ef4444" rx="0.5"/>
+        <line x1="28" y1="10" x2="28" y2="30" stroke="#52525b" strokeWidth="1"/>
+        <rect x="25" y="14" width="6" height="10" fill="#ef4444" rx="0.5"/>
+        <line x1="4" y1="24" x2="44" y2="24" stroke="#6b7280" strokeWidth="0.5" strokeDasharray="2 2"/>
+        <text x="36" y="22" fontSize="5" fill="#6b7280">fail</text>
+      </svg>
+    ),
+    caution: (
+      // HH+HL but bearish close (rejection candle)
+      <svg width={w} height={h} viewBox="0 0 48 36">
+        <line x1="12" y1="10" x2="12" y2="28" stroke="#52525b" strokeWidth="1"/>
+        <rect x="9" y="14" width="6" height="10" fill="#10b981" rx="0.5"/>
+        <line x1="28" y1="6" x2="28" y2="30" stroke="#52525b" strokeWidth="1"/>
+        <rect x="25" y="18" width="6" height="10" fill="#ef4444" rx="0.5"/>
+        {/* Long upper wick showing rejection */}
+        <text x="36" y="12" fontSize="5" fill="#f59e0b">!</text>
+      </svg>
+    ),
+    neutral: (
+      // Inside candle — C2 fully inside C1
+      <svg width={w} height={h} viewBox="0 0 48 36">
+        <line x1="12" y1="6" x2="12" y2="30" stroke="#52525b" strokeWidth="1"/>
+        <rect x="9" y="10" width="6" height="16" fill="#6b7280" rx="0.5"/>
+        <line x1="28" y1="12" x2="28" y2="26" stroke="#52525b" strokeWidth="1"/>
+        <rect x="25" y="14" width="6" height="10" fill="#6b7280" rx="0.5"/>
+        {/* Bracket showing "inside" */}
+        <line x1="6" y1="10" x2="6" y2="26" stroke="#6b7280" strokeWidth="0.5"/>
+        <line x1="5" y1="10" x2="7" y2="10" stroke="#6b7280" strokeWidth="0.5"/>
+        <line x1="5" y1="26" x2="7" y2="26" stroke="#6b7280" strokeWidth="0.5"/>
+      </svg>
+    ),
+  };
+
+  return patterns[patternId] || null;
+}
+
 export default function BiasScanner() {
   const { levels, lastPrice } = useResearch();
   const [selectedPattern, setSelectedPattern] = useState(null);
@@ -93,13 +176,18 @@ export default function BiasScanner() {
 
       {/* Pattern selection grid */}
       {showPatterns && (
-        <div className="grid grid-cols-2 gap-1">
+        <div className="grid grid-cols-2 gap-1.5">
           {HTF_PATTERNS.map(p => (
             <button key={p.id} onClick={() => { setSelectedPattern(p.id); setShowPatterns(false); }}
-              className={cn('px-2 py-1.5 rounded border text-left transition-all',
+              className={cn('px-2 py-2 rounded border text-left transition-all',
                 selectedPattern === p.id ? p.bg : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light')}>
-              <div className={cn('text-[10px] font-medium', selectedPattern === p.id ? p.color : 'text-slate-300')}>{p.label}</div>
-              <div className="text-[8px] text-slate-500 leading-tight mt-0.5">{p.desc}</div>
+              <div className="flex items-center gap-2">
+                <CandleVisual patternId={p.id} />
+                <div>
+                  <div className={cn('text-[10px] font-medium', selectedPattern === p.id ? p.color : 'text-slate-300')}>{p.label}</div>
+                  <div className="text-[8px] text-slate-500 leading-tight mt-0.5">{p.desc}</div>
+                </div>
+              </div>
             </button>
           ))}
         </div>
