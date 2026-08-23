@@ -81,12 +81,12 @@ function poll() {
   const price = extractPrice();
   if (price !== null) {
     if (price !== lastPrice) {
-      chrome.storage.local.set({
-        lh_live_price: {
-          price,
-          timestamp: Date.now(),
-          source: 'tradingview',
-        }
+      // Send to background script which injects into app tabs
+      chrome.runtime.sendMessage({
+        type: 'PRICE_UPDATE',
+        price,
+        timestamp: Date.now(),
+        source: 'tradingview',
       });
       lastPrice = price;
     }
