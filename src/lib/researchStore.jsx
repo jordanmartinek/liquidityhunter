@@ -24,6 +24,9 @@ export function ResearchProvider({ children }) {
 
   // ─── Live Price Bridge ────────────────────────────────────────
   const [isLive, setIsLive] = useState(false);
+  const [priceStale, setPriceStale] = useState(false);
+  const lastPriceChangeRef = useRef(Date.now());
+  const prevLivePriceRef = useRef(0);
 
   useEffect(() => {
     function checkLivePrice() {
@@ -33,6 +36,18 @@ export function ResearchProvider({ children }) {
         const data = JSON.parse(raw);
         const age = Date.now() - data.timestamp;
         if (age < LIVE_PRICE_STALE && data.price > 0) {
+          // Check if price actually changed
+          if (data.price !== prevLivePriceRef.current) {
+            prevLivePriceRef.current = data.price;
+            lastPriceChangeRef.current = Date.now();
+            setPriceStale(false);
+          } else {
+            // Price hasn't changed — check if stale (5+ minutes)
+            const timeSinceChange = Date.now() - lastPriceChangeRef.current;
+            if (timeSinceChange > 5 * 60 * 1000) {
+              setPriceStale(true);
+            }
+          }
           setLastPrice(data.price);
           localStorage.setItem('lh_last_price', data.price.toString());
           setIsLive(true);
@@ -180,6 +195,7 @@ export function ResearchProvider({ children }) {
     lastPrice,
     updateLastPrice,
     isLive,
+    priceStale,
 
     // Timeframe
     activeTimeframe,
