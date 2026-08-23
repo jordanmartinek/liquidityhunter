@@ -3,180 +3,211 @@ import { useResearch } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 /**
- * Directional Bias Scanner
+ * Strategy Bias Scanner
  * 
- * Analyzes YOUR marked levels relative to last price.
- * Where is more liquidity resting — above or below?
- * No external API needed — uses your own research.
+ * Implements the 3-step framework:
+ * 1. HTF Bias — based on candle pattern analysis (user selects)
+ * 2. Liquidity Targeting — which levels are valid given the bias
+ * 3. Level Validation — filters your marked levels to show only actionable ones
  * 
- * Logic:
- * - Counts BSL levels above price, SSL levels below
- * - Weights by: strength, proximity, sweep status, equal H/L clusters
- * - More untouched liquidity in one direction = that's the likely draw
+ * The scanner doesn't guess — YOU set the HTF pattern you see,
+ * and it tells you which of your levels to watch and which to ignore.
  */
 
-function analyzeBias(levels, currentPrice) {
-  if (!levels || levels.length === 0 || !currentPrice || currentPrice <= 0) return null;
-
-  // Only count untouched and tested levels (swept = already taken)
-  const active = levels.filter(l => l.sweep_status !== 'Swept');
-  if (active.length === 0) return null;
-
-  // BSL = Buy-Side Liquidity (above price) — targets for longs to sweep, shorts to enter after
-  const bslLevels = active.filter(l => l.price > currentPrice);
-  // SSL = Sell-Side Liquidity (below price)
-  const sslLevels = active.filter(l => l.price < currentPrice);
-
-  // Score each side
-  let bslScore = 0;
-  let sslScore = 0;
-
-  // Weight by strength
-  bslLevels.forEach(l => { bslScore += (l.strength || 3); });
-  sslLevels.forEach(l => { sslScore += (l.strength || 3); });
-
-  // Bonus for Equal Highs/Lows (high-priority pools)
-  const eqHighs = bslLevels.filter(l => l.pool_type === 'Equal Highs');
-  const eqLows = sslLevels.filter(l => l.pool_type === 'Equal Lows');
-  bslScore += eqHighs.length * 3;
-  sslScore += eqLows.length * 3;
-
-  // Proximity bonus (closest untouched level gets extra weight)
-  if (bslLevels.length > 0) {
-    const closest = Math.min(...bslLevels.map(l => l.price - currentPrice));
-    if (closest < currentPrice * 0.005) bslScore += 3; // within 0.5%
-  }
-  if (sslLevels.length > 0) {
-    const closest = Math.min(...sslLevels.map(l => currentPrice - l.price));
-    if (closest < currentPrice * 0.005) sslScore += 3;
-  }
-
-  // Untouched vs Tested bonus (untouched = higher draw)
-  bslScore += bslLevels.filter(l => l.sweep_status === 'Untouched').length * 1;
-  sslScore += sslLevels.filter(l => l.sweep_status === 'Untouched').length * 1;
-
-  // Determine bias
-  const totalScore = bslScore + sslScore || 1;
-  const bslPercent = Math.round((bslScore / totalScore) * 100);
-  const sslPercent = 100 - bslPercent;
-
-  let bias, confidence;
-  if (bslPercent > 65) { bias = 'BSL'; confidence = 'high'; }
-  else if (bslPercent > 55) { bias = 'BSL'; confidence = 'moderate'; }
-  else if (sslPercent > 65) { bias = 'SSL'; confidence = 'high'; }
-  else if (sslPercent > 55) { bias = 'SSL'; confidence = 'moderate'; }
-  else { bias = 'neutral'; confidence = 'low'; }
-
-  // Find nearest targets
-  const nearestBSL = bslLevels.length > 0 ? bslLevels.reduce((min, l) => l.price < min.price ? l : min) : null;
-  const nearestSSL = sslLevels.length > 0 ? sslLevels.reduce((max, l) => l.price > max.price ? l : max) : null;
-
-  return {
-    bias, confidence, bslPercent, sslPercent,
-    bslCount: bslLevels.length,
-    sslCount: sslLevels.length,
-    eqHighs: eqHighs.length,
-    eqLows: eqLows.length,
-    nearestBSL: nearestBSL ? { price: nearestBSL.price, type: nearestBSL.name || nearestBSL.pool_type } : null,
-    nearestSSL: nearestSSL ? { price: nearestSSL.price, type: nearestSSL.name || nearestSSL.pool_type } : null,
-  };
-}
+const HTF_PATTERNS = [
+  { id: 'strong_bull', label: 'Strong Bullish', desc: 'HH + HL, close above prev high', color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30', bias: 'bullish', conviction: 'high' },
+  { id: 'weak_bull', label: 'Weak Bullish', desc: 'HH + HL, but fails to close above prev high', color: 'text-emerald-300', bg: 'bg-emerald-500/5 border-emerald-500/20', bias: 'bullish', conviction: 'low' },
+  { id: 'strong_bear', label: 'Strong Bearish', desc: 'LH + LL, close below prev low', color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30', bias: 'bearish', conviction: 'high' },
+  { id: 'weak_bear', label: 'Weak Bearish', desc: 'LH + LL, fails to close below prev low', color: 'text-red-300', bg: 'bg-red-500/5 border-red-500/20', bias: 'bearish', conviction: 'low' },
+  { id: 'caution', label: 'Caution / Reversal', desc: 'HH+HL but bearish close, or LL+LH but bullish close', color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/30', bias: 'reversal', conviction: 'medium' },
+  { id: 'neutral', label: 'Neutral / Inside', desc: 'Inside candle — no HH or LL. Wait for break.', color: 'text-slate-400', bg: 'bg-zinc-700/30 border-zinc-600', bias: 'neutral', conviction: 'none' },
+];
 
 export default function BiasScanner() {
   const { levels, lastPrice } = useResearch();
-  const [result, setResult] = useState(null);
+  const [selectedPattern, setSelectedPattern] = useState(null);
+  const [showPatterns, setShowPatterns] = useState(false);
 
-  const handleScan = () => {
-    const analysis = analyzeBias(levels, lastPrice);
-    setResult(analysis);
+  const pattern = HTF_PATTERNS.find(p => p.id === selectedPattern);
+
+  // Filter levels based on bias
+  const getValidLevels = () => {
+    if (!pattern || levels.length === 0) return { targets: [], watch: [], ignore: [] };
+
+    const active = levels.filter(l => l.sweep_status !== 'Swept');
+    const above = active.filter(l => lastPrice > 0 ? l.price > lastPrice : l.side === 'Buy-Side');
+    const below = active.filter(l => lastPrice > 0 ? l.price < lastPrice : l.side === 'Sell-Side');
+
+    if (pattern.bias === 'bullish') {
+      // Bullish: target BSL above (PDH, session highs, equal highs)
+      // Watch: SSL below for SFP entry (sweep lows → go long)
+      // Ignore: BSL that's already been swept
+      return {
+        targets: above.filter(l => l.side === 'Buy-Side'),
+        watch: below.filter(l => l.side === 'Sell-Side'),
+        ignore: above.filter(l => l.side === 'Sell-Side'),
+      };
+    } else if (pattern.bias === 'bearish') {
+      // Bearish: target SSL below (PDL, session lows, equal lows)
+      // Watch: BSL above for SFP entry (sweep highs → go short)
+      // Ignore: SSL that's already been swept
+      return {
+        targets: below.filter(l => l.side === 'Sell-Side'),
+        watch: above.filter(l => l.side === 'Buy-Side'),
+        ignore: below.filter(l => l.side === 'Buy-Side'),
+      };
+    } else if (pattern.bias === 'reversal') {
+      // Reversal: watch both extremes for SFP
+      return {
+        targets: [],
+        watch: [...above.slice(0, 2), ...below.slice(0, 2)],
+        ignore: [],
+      };
+    } else {
+      // Neutral: wait for break of either extreme
+      const highestBSL = above.length > 0 ? [above.reduce((max, l) => l.price > max.price ? l : max)] : [];
+      const lowestSSL = below.length > 0 ? [below.reduce((min, l) => l.price < min.price ? l : min)] : [];
+      return {
+        targets: [],
+        watch: [...highestBSL, ...lowestSSL],
+        ignore: active.filter(l => !highestBSL.includes(l) && !lowestSSL.includes(l)),
+      };
+    }
   };
 
-  const noData = levels.length === 0 || lastPrice <= 0;
+  const { targets, watch, ignore } = getValidLevels();
+
+  // Check if primary target already taken
+  const targetAlreadyTaken = pattern && (pattern.bias === 'bullish' || pattern.bias === 'bearish') && targets.length === 0 && levels.filter(l => l.sweep_status === 'Swept').length > 0;
 
   return (
     <div className="space-y-2">
-      {/* Scan button */}
-      <button onClick={handleScan} disabled={noData}
-        className={cn('w-full py-1.5 rounded text-[10px] font-semibold transition-all border',
-          noData ? 'bg-zinc-800/50 border-zinc-700 text-zinc-600 cursor-not-allowed' :
-          'bg-terminal-surface border-terminal-border text-slate-400 hover:text-teal-400 hover:border-teal-500/30')}>
-        {noData ? '🧭 Set price + add levels first' : '🧭 Analyze Directional Bias'}
-      </button>
+      {/* HTF Pattern Selector */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">HTF Bias</span>
+        <button onClick={() => setShowPatterns(!showPatterns)}
+          className="text-[9px] text-slate-500 hover:text-slate-300">
+          {showPatterns ? 'Close' : 'Select Pattern'}
+        </button>
+      </div>
 
-      {/* Result */}
-      {result && (
-        <div className={cn('rounded border p-2.5 space-y-2',
-          result.bias === 'BSL' ? 'bg-cyan-500/5 border-cyan-500/20' :
-          result.bias === 'SSL' ? 'bg-orange-500/5 border-orange-500/20' :
-          'bg-zinc-800/50 border-zinc-700')}>
+      {/* Pattern selection grid */}
+      {showPatterns && (
+        <div className="grid grid-cols-2 gap-1">
+          {HTF_PATTERNS.map(p => (
+            <button key={p.id} onClick={() => { setSelectedPattern(p.id); setShowPatterns(false); }}
+              className={cn('px-2 py-1.5 rounded border text-left transition-all',
+                selectedPattern === p.id ? p.bg : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light')}>
+              <div className={cn('text-[10px] font-medium', selectedPattern === p.id ? p.color : 'text-slate-300')}>{p.label}</div>
+              <div className="text-[8px] text-slate-500 leading-tight mt-0.5">{p.desc}</div>
+            </button>
+          ))}
+        </div>
+      )}
 
+      {/* Selected bias display */}
+      {pattern && (
+        <div className={cn('rounded border p-2.5 space-y-2', pattern.bg)}>
           {/* Bias header */}
           <div className="flex items-center justify-between">
-            <span className={cn('text-sm font-bold',
-              result.bias === 'BSL' ? 'text-cyan-400' : result.bias === 'SSL' ? 'text-orange-400' : 'text-slate-400')}>
-              {result.bias === 'BSL' ? '▲ Draw to BSL' : result.bias === 'SSL' ? '▼ Draw to SSL' : '— Neutral'}
-            </span>
-            <span className={cn('text-[9px] px-1.5 py-0.5 rounded border font-medium',
-              result.confidence === 'high' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-              result.confidence === 'moderate' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-              'bg-zinc-700/50 text-zinc-500 border-zinc-700')}>
-              {result.confidence}
-            </span>
-          </div>
-
-          {/* Visual bar */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-1 h-4">
-              <span className="text-[9px] text-cyan-500 w-8 text-right">{result.bslPercent}%</span>
-              <div className="flex-1 h-3 bg-zinc-800 rounded-full overflow-hidden flex">
-                <div className="h-full bg-cyan-500/60 transition-all" style={{ width: `${result.bslPercent}%` }} />
-                <div className="h-full bg-orange-500/60 transition-all" style={{ width: `${result.sslPercent}%` }} />
+            <div>
+              <span className={cn('text-sm font-bold', pattern.color)}>{pattern.label}</span>
+              <div className="text-[9px] text-slate-500 mt-0.5">
+                Conviction: <span className={cn(
+                  pattern.conviction === 'high' ? 'text-emerald-400' :
+                  pattern.conviction === 'low' ? 'text-amber-400' :
+                  pattern.conviction === 'medium' ? 'text-amber-300' : 'text-slate-500'
+                )}>{pattern.conviction}</span>
               </div>
-              <span className="text-[9px] text-orange-500 w-8">{result.sslPercent}%</span>
             </div>
-            <div className="flex justify-between text-[8px] text-slate-600 px-9">
-              <span>BSL ({result.bslCount})</span>
-              <span>SSL ({result.sslCount})</span>
+            <button onClick={() => setSelectedPattern(null)} className="text-[9px] text-slate-600 hover:text-slate-400">✕</button>
+          </div>
+
+          {/* Strategy guidance */}
+          <div className="text-[9px] text-slate-400 leading-relaxed border-t border-terminal-border/50 pt-2 space-y-1">
+            {pattern.bias === 'bullish' && (
+              <>
+                <p>📋 <strong className="text-slate-300">Plan:</strong> Only look for buying opportunities. Wait for SSL sweep (SFP) below, then enter long targeting BSL above.</p>
+                <p>🎯 <strong className="text-slate-300">Target:</strong> Previous daily high or next untouched BSL.</p>
+                <p>🛑 <strong className="text-slate-300">Invalidation:</strong> If PDH already taken, size down or sit out.</p>
+              </>
+            )}
+            {pattern.bias === 'bearish' && (
+              <>
+                <p>📋 <strong className="text-slate-300">Plan:</strong> Only look for selling opportunities. Wait for BSL sweep (SFP) above, then enter short targeting SSL below.</p>
+                <p>🎯 <strong className="text-slate-300">Target:</strong> Previous daily low or next untouched SSL.</p>
+                <p>🛑 <strong className="text-slate-300">Invalidation:</strong> If PDL already taken, size down or sit out.</p>
+              </>
+            )}
+            {pattern.bias === 'reversal' && (
+              <p>⚠️ <strong className="text-slate-300">Caution:</strong> Low conviction for continuation. Watch for SFP at either extreme — likely reversal or deeper retracement incoming.</p>
+            )}
+            {pattern.bias === 'neutral' && (
+              <p>⏸️ <strong className="text-slate-300">Wait:</strong> Inside candle = indecision. Sit on hands until price breaks and sweeps one extreme. Then look for SFP in the direction of the break.</p>
+            )}
+          </div>
+
+          {/* Target already taken warning */}
+          {targetAlreadyTaken && (
+            <div className="p-1.5 rounded bg-amber-500/10 border border-amber-500/20 text-center">
+              <span className="text-[9px] font-bold text-amber-400">⚠ Primary target already swept — size down or sit out</span>
             </div>
-          </div>
+          )}
 
-          {/* Details */}
-          <div className="space-y-0.5 text-[9px]">
-            {result.eqHighs > 0 && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Equal Highs (BSL pools):</span>
-                <span className="text-cyan-400">{result.eqHighs}</span>
-              </div>
-            )}
-            {result.eqLows > 0 && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Equal Lows (SSL pools):</span>
-                <span className="text-orange-400">{result.eqLows}</span>
-              </div>
-            )}
-            {result.nearestBSL && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Nearest BSL:</span>
-                <span className="text-cyan-300 tabular-nums font-mono">{result.nearestBSL.price.toFixed(2)} <span className="text-cyan-500/60">({result.nearestBSL.type})</span></span>
-              </div>
-            )}
-            {result.nearestSSL && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Nearest SSL:</span>
-                <span className="text-orange-300 tabular-nums font-mono">{result.nearestSSL.price.toFixed(2)} <span className="text-orange-500/60">({result.nearestSSL.type})</span></span>
-              </div>
-            )}
-          </div>
+          {/* Valid levels breakdown */}
+          {(targets.length > 0 || watch.length > 0) && (
+            <div className="space-y-1.5 border-t border-terminal-border/50 pt-2">
+              {/* Targets */}
+              {targets.length > 0 && (
+                <div>
+                  <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-0.5">🎯 Targets ({targets.length})</div>
+                  <div className="space-y-0.5">
+                    {targets.slice(0, 4).map(l => (
+                      <div key={l.id} className="flex items-center justify-between text-[9px] px-1.5 py-0.5 rounded bg-terminal-bg/50">
+                        <span className="text-slate-300">{l.name || l.pool_type}</span>
+                        <span className="text-slate-400 tabular-nums font-mono">{l.price.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* Interpretation */}
-          <p className="text-[9px] text-slate-500 italic leading-relaxed">
-            {result.bias === 'BSL' && result.confidence === 'high' && 'Strong liquidity above. Price likely drawn up to sweep highs before reversal.'}
-            {result.bias === 'BSL' && result.confidence === 'moderate' && 'More untouched liquidity above. Slight upside draw.'}
-            {result.bias === 'SSL' && result.confidence === 'high' && 'Strong liquidity below. Price likely drawn down to sweep lows before reversal.'}
-            {result.bias === 'SSL' && result.confidence === 'moderate' && 'More untouched liquidity below. Slight downside draw.'}
-            {result.bias === 'neutral' && 'Liquidity balanced. No clear draw — wait for structure.'}
-          </p>
+              {/* Watch for SFP */}
+              {watch.length > 0 && (
+                <div>
+                  <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-0.5">👁 Watch for SFP ({watch.length})</div>
+                  <div className="space-y-0.5">
+                    {watch.slice(0, 4).map(l => (
+                      <div key={l.id} className="flex items-center justify-between text-[9px] px-1.5 py-0.5 rounded bg-terminal-bg/50">
+                        <div className="flex items-center gap-1">
+                          <span className={cn('text-[8px] font-bold', l.side === 'Buy-Side' ? 'text-cyan-500' : 'text-orange-500')}>
+                            {l.side === 'Buy-Side' ? '▲' : '▼'}
+                          </span>
+                          <span className="text-slate-300">{l.name || l.pool_type}</span>
+                        </div>
+                        <span className="text-slate-400 tabular-nums font-mono">{l.price.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[8px] text-slate-600 mt-1 italic">
+                    {pattern.bias === 'bullish' && 'When price sweeps these lows + closes back above = SFP entry long'}
+                    {pattern.bias === 'bearish' && 'When price sweeps these highs + closes back below = SFP entry short'}
+                    {pattern.bias === 'reversal' && 'Watch both sides for sweep + failure = reversal entry'}
+                    {pattern.bias === 'neutral' && 'Wait for break of one extreme, then look for SFP'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      )}
+
+      {/* No pattern selected — prompt */}
+      {!pattern && !showPatterns && (
+        <button onClick={() => setShowPatterns(true)}
+          className="w-full py-2 rounded text-[10px] font-medium bg-terminal-surface border border-terminal-border text-slate-400 hover:text-slate-300 hover:border-terminal-border-light transition-all">
+          🧭 Set HTF Bias to filter your levels
+        </button>
       )}
     </div>
   );
