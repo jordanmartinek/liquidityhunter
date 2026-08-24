@@ -25,10 +25,11 @@ export default function ResearchCockpit() {
       {/* Top Bar */}
       <TopBar />
 
-      {/* Live Alerts Bar — always visible when bridge is active */}
-      <div className="shrink-0 px-3 py-1 border-b border-terminal-border bg-terminal-bg">
-        <LiveAlerts />
-        <LiveIntelligence />
+      {/* Live Alerts — compact fixed-height bar, never grows beyond 1 line */}
+      <div className="shrink-0 border-b border-terminal-border bg-terminal-bg overflow-hidden">
+        <div className="px-3 py-0.5 flex items-center gap-2 h-7 overflow-hidden">
+          <LiveAlerts />
+        </div>
       </div>
 
       {/* Main Content Area */}
@@ -129,6 +130,11 @@ export default function ResearchCockpit() {
           <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
             {rightPanel === 'analysis' ? (
               <div className="space-y-0">
+                {/* Live Intelligence (compact) */}
+                <div className="p-2 border-b border-terminal-border">
+                  <LiveIntelligence />
+                </div>
+
                 {/* Draw Indicator */}
                 <div className="p-3 border-b border-terminal-border">
                   <DrawIndicator />
