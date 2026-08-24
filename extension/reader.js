@@ -7,17 +7,34 @@
 const POLL_INTERVAL = 1000;
 
 function extractPrice() {
-  // Primary: TradingView OHLC legend values (class contains 'valueValue')
+  // Priority 1: Bid/Ask buttons — these update tick-by-tick (real-time)
+  const buttons = document.querySelectorAll('[class*="buttonText"]');
+  const buttonPrices = [];
+  for (const el of buttons) {
+    const text = el.textContent.trim().replace(/[,\s]/g, '');
+    const price = parseFloat(text);
+    if (price > 1000 && price < 50000 && !isNaN(price)) {
+      buttonPrices.push(price);
+    }
+  }
+  // Take the average of bid/ask for mid-price (or first one if only one)
+  if (buttonPrices.length >= 2) {
+    return (buttonPrices[0] + buttonPrices[1]) / 2;
+  }
+  if (buttonPrices.length === 1) {
+    return buttonPrices[0];
+  }
+
+  // Priority 2: OHLC legend values (updates per candle close)
   const legendValues = document.querySelectorAll('[class*="valueValue"]');
   if (legendValues.length >= 4) {
-    // The 4th value is typically the Close price (O, H, L, C)
+    // 4th value = Close price
     const closeText = legendValues[3].textContent.trim().replace(/[,\s]/g, '');
     const closePrice = parseFloat(closeText);
     if (closePrice > 1000 && closePrice < 50000 && !isNaN(closePrice)) {
       return closePrice;
     }
   }
-  // Fallback: try first valid value from legend
   for (const el of legendValues) {
     const text = el.textContent.trim().replace(/[,\s]/g, '');
     const price = parseFloat(text);
@@ -26,17 +43,7 @@ function extractPrice() {
     }
   }
 
-  // Secondary: button text with price (bid/ask buttons)
-  const buttons = document.querySelectorAll('[class*="buttonText"]');
-  for (const el of buttons) {
-    const text = el.textContent.trim().replace(/[,\s]/g, '');
-    const price = parseFloat(text);
-    if (price > 1000 && price < 50000 && !isNaN(price)) {
-      return price;
-    }
-  }
-
-  // Brute force fallback: walk all text nodes
+  // Priority 3: Brute force text node scan
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while (node = walker.nextNode()) {
