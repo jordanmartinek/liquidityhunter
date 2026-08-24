@@ -13,6 +13,7 @@ import PaperTradePanel from '@/components/trading/PaperTradePanel';
 import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
 import BiasScanner from '@/components/trading/BiasScanner';
 import LiveAlerts from '@/components/trading/LiveAlerts';
+import LiveIntelligence from '@/components/trading/LiveIntelligence';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -27,6 +28,7 @@ export default function ResearchCockpit() {
       {/* Live Alerts Bar — always visible when bridge is active */}
       <div className="shrink-0 px-3 py-1 border-b border-terminal-border bg-terminal-bg">
         <LiveAlerts />
+        <LiveIntelligence />
       </div>
 
       {/* Main Content Area */}
