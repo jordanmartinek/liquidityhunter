@@ -122,10 +122,12 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence }) {
 }
 
 export default function LiquidityLadder() {
-  const { getFilteredLevels, activeTimeframe, lastPrice, drawDirection } = useResearch();
+  const { getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
   const [priceTrail, setPriceTrail] = useState([]);
+  const priceLineRef = useRef([]); // Full price history with timestamps
+  const [priceLine, setPriceLine] = useState([]);
   const containerRef = useRef(null);
 
   // Zoom & Pan state
@@ -140,6 +142,14 @@ export default function LiquidityLadder() {
     priceTrailRef.current.push(lastPrice);
     if (priceTrailRef.current.length > 20) priceTrailRef.current = priceTrailRef.current.slice(-20);
     setPriceTrail([...priceTrailRef.current]);
+
+    // Full price line history (for line chart) — keep last 300 ticks (~5 min at 1/sec)
+    priceLineRef.current.push({ price: lastPrice, time: Date.now() });
+    if (priceLineRef.current.length > 300) priceLineRef.current = priceLineRef.current.slice(-300);
+    // Only update state every 3 ticks to reduce re-renders
+    if (priceLineRef.current.length % 3 === 0) {
+      setPriceLine([...priceLineRef.current]);
+    }
   }, [lastPrice]);
 
   // Zoom (scroll wheel)
@@ -252,7 +262,7 @@ export default function LiquidityLadder() {
       bottomPrice: paddedMin,
       trailPositions: trailPos,
     };
-  }, [allLevels, lastPrice, priceTrail, zoom, panOffset]);
+  }, [allLevels, lastPrice, priceTrail, zoom, panOffset, priceLine]);
 
   if (allLevels.length === 0 && lastPrice <= 0) {
     return (
@@ -328,6 +338,74 @@ export default function LiquidityLadder() {
 
       {/* Ladder rail */}
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
+
+      {/* Price Line Chart — SVG overlay showing price progression */}
+      {priceLine.length > 5 && (
+        <svg className="absolute inset-0 top-5 bottom-5 left-14 right-8 pointer-events-none z-5 overflow-visible" preserveAspectRatio="none">
+          {(() => {
+            const svgWidth = 100; // percentage-based
+            const svgHeight = 100;
+            const times = priceLine.map(p => p.time);
+            const timeMin = Math.min(...times);
+            const timeMax = Math.max(...times);
+            const timeRange = timeMax - timeMin || 1;
+
+            // Map each point to SVG coordinates
+            // X = time (left to right), Y = price (using same transform as levels)
+            const allPrices = [...allLevels.map(l => l.price), ...priceLine.map(p => p.price)];
+            if (lastPrice > 0) allPrices.push(lastPrice);
+            const maxP = Math.max(...allPrices);
+            const minP = Math.min(...allPrices);
+            const rawRange = maxP - minP;
+            const padding = Math.max(rawRange * 0.12, 5);
+            const paddedMax = maxP + padding;
+            const totalRange = paddedMax - (minP - padding);
+
+            const transformY = (price) => {
+              let pct = ((paddedMax - price) / totalRange) * 100;
+              const center = 50 + panOffset;
+              return (pct - center) * zoom + 50;
+            };
+
+            const points = priceLine.map(p => {
+              const x = ((p.time - timeMin) / timeRange) * svgWidth;
+              const y = transformY(p.price);
+              return { x, y };
+            }).filter(p => p.y >= -20 && p.y <= 120); // Only visible points
+
+            if (points.length < 2) return null;
+
+            const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+            return (
+              <path
+                d={pathD}
+                fill="none"
+                stroke="rgba(255,255,255,0.25)"
+                strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })()}
+        </svg>
+      )}
+
+      {/* Time axis (bottom) */}
+      {priceLine.length > 5 && (
+        <div className="absolute bottom-0 left-14 right-8 h-4 flex items-center justify-between pointer-events-none z-10">
+          {(() => {
+            const times = priceLine.map(p => p.time);
+            const timeMin = Math.min(...times);
+            const timeMax = Math.max(...times);
+            const ticks = [timeMin, timeMin + (timeMax - timeMin) * 0.25, timeMin + (timeMax - timeMin) * 0.5, timeMin + (timeMax - timeMin) * 0.75, timeMax];
+            return ticks.map((t, i) => (
+              <span key={i} className="text-[7px] text-slate-600 tabular-nums font-mono">
+                {new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' })}
+              </span>
+            ));
+          })()}
+        </div>
+      )}
 
       {/* Price trail (thin dots showing recent price path) */}
       {trailPositions.length > 2 && (
