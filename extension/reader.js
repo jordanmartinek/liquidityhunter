@@ -1,13 +1,15 @@
 /**
  * READER — runs on TradingView pages.
  * Reads the current price from the DOM every second.
- * Stores it in chrome.storage.local (accessible by all extension scripts).
+ * Stores in chrome.storage.local (shared with writer.js on app page).
+ * 
+ * NO background script needed — content scripts don't get suspended.
  */
 
 const POLL_INTERVAL = 1000;
 
 function extractPrice() {
-  // Priority 1: Bid/Ask buttons — these update tick-by-tick (real-time)
+  // Priority 1: Bid/Ask buttons — update tick-by-tick
   const buttons = document.querySelectorAll('[class*="buttonText"]');
   const buttonPrices = [];
   for (const el of buttons) {
@@ -17,7 +19,6 @@ function extractPrice() {
       buttonPrices.push(price);
     }
   }
-  // Take the average of bid/ask for mid-price (or first one if only one)
   if (buttonPrices.length >= 2) {
     return (buttonPrices[0] + buttonPrices[1]) / 2;
   }
@@ -25,10 +26,9 @@ function extractPrice() {
     return buttonPrices[0];
   }
 
-  // Priority 2: OHLC legend values (updates per candle close)
+  // Priority 2: OHLC legend values
   const legendValues = document.querySelectorAll('[class*="valueValue"]');
   if (legendValues.length >= 4) {
-    // 4th value = Close price
     const closeText = legendValues[3].textContent.trim().replace(/[,\s]/g, '');
     const closePrice = parseFloat(closeText);
     if (closePrice > 1000 && closePrice < 50000 && !isNaN(closePrice)) {
@@ -43,7 +43,7 @@ function extractPrice() {
     }
   }
 
-  // Priority 3: Brute force text node scan
+  // Priority 3: Brute force
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while (node = walker.nextNode()) {
@@ -82,44 +82,24 @@ function showStatus(active, price) {
   }
 }
 
-let lastPrice = null;
-
 function poll() {
   const price = extractPrice();
   if (price !== null) {
-    // Always send — even if price hasn't changed — so app knows we're alive
-    chrome.runtime.sendMessage({
-      type: 'PRICE_UPDATE',
-      price,
-      timestamp: Date.now(),
-      source: 'tradingview',
+    // Write to chrome.storage.local — writer.js on app page reads this
+    chrome.storage.local.set({
+      lh_live_price: {
+        price,
+        timestamp: Date.now(),
+        source: 'tradingview',
+      }
     });
-    lastPrice = price;
     showStatus(true, price);
   } else {
     showStatus(false);
   }
 }
 
-// Start polling — use multiple strategies to avoid Chrome throttling
-console.log('[LH Bridge] Reader active on TradingView — polling every 1s');
+console.log('[LH Bridge] Reader active — writing to chrome.storage every 1s');
 showStatus(false);
-
-// Primary: setInterval (may get throttled in background tabs)
 setInterval(poll, POLL_INTERVAL);
-
-// Anti-throttle: also use requestAnimationFrame chain for foreground
-// and a Web Worker message for background
-let lastPollTime = 0;
-function rafPoll() {
-  const now = Date.now();
-  if (now - lastPollTime >= POLL_INTERVAL) {
-    lastPollTime = now;
-    poll();
-  }
-  requestAnimationFrame(rafPoll);
-}
-requestAnimationFrame(rafPoll);
-
-// Initial poll after chart loads
 setTimeout(poll, 2000);
