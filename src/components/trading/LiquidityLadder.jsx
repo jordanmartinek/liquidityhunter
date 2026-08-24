@@ -340,7 +340,7 @@ export default function LiquidityLadder() {
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
 
       {/* Price Line Chart — SVG overlay showing price progression */}
-      {priceLine.length > 5 && (
+      {priceLine.length > 5 && priceMarkerPercent !== null && (
         <svg className="absolute inset-0 pointer-events-none z-[6]" style={{ top: '20px', bottom: '20px', left: '0', right: '0' }} viewBox="0 0 100 100" preserveAspectRatio="none">
           {(() => {
             const times = priceLine.map(p => p.time);
@@ -348,7 +348,10 @@ export default function LiquidityLadder() {
             const timeMax = Math.max(...times);
             const timeRange = timeMax - timeMin || 1;
 
-            // Use EXACTLY the same price→position transform as the rungs
+            // The first price point = our anchor. Calculate Y offset from price marker position.
+            const firstPrice = priceLine[0].price;
+
+            // Use the same price-to-Y transform as the ladder
             const allPrices = [...allLevels.map(l => l.price)];
             if (lastPrice > 0) allPrices.push(lastPrice);
             priceLine.forEach(p => allPrices.push(p.price));
@@ -360,29 +363,33 @@ export default function LiquidityLadder() {
             const paddedMin = minP - padding;
             const totalRange = paddedMax - paddedMin;
 
-            // Same transform as positions in the useMemo above
-            const transformY = (price) => {
+            const priceToY = (price) => {
               let pct = ((paddedMax - price) / totalRange) * 100;
               const center = 50 + panOffset;
               return (pct - center) * zoom + 50;
             };
 
-            const points = priceLine.map(p => {
-              const x = ((p.time - timeMin) / timeRange) * 100;
-              const y = transformY(p.price);
-              return { x, y };
-            });
+            const points = priceLine.map(p => ({
+              x: ((p.time - timeMin) / timeRange) * 100,
+              y: priceToY(p.price),
+            }));
 
             if (points.length < 2) return null;
 
             const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
+            // Color: green if last > first, red if last < first
+            const priceUp = priceLine[priceLine.length - 1].price >= firstPrice;
+            const lineColor = priceUp ? 'rgba(16,185,129,0.6)' : 'rgba(239,68,68,0.6)';
+            const glowColor = priceUp ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+
             return (
               <>
-                <path d={pathD} fill="none" stroke="rgba(45,212,191,0.15)" strokeWidth="2" strokeLinejoin="round" />
-                <path d={pathD} fill="none" stroke="rgba(45,212,191,0.6)" strokeWidth="0.7" strokeLinejoin="round" />
+                <path d={pathD} fill="none" stroke={glowColor} strokeWidth="2.5" strokeLinejoin="round" />
+                <path d={pathD} fill="none" stroke={lineColor} strokeWidth="0.8" strokeLinejoin="round" />
                 {points.length > 0 && (
-                  <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="1.5" fill="#2dd4bf" />
+                  <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="1.5"
+                    fill={priceUp ? '#10b981' : '#ef4444'} />
                 )}
               </>
             );
