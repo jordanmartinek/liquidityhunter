@@ -126,6 +126,13 @@ export default function LiquidityLadder() {
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
   const [priceTrail, setPriceTrail] = useState([]);
+  const containerRef = useRef(null);
+
+  // Zoom & Pan state
+  const [zoom, setZoom] = useState(1); // 1 = fit all, >1 = zoomed in
+  const [panOffset, setPanOffset] = useState(0); // offset in % of range
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ y: 0, panAtStart: 0 });
 
   // Track price trail (last 20 positions)
   useEffect(() => {
@@ -134,6 +141,46 @@ export default function LiquidityLadder() {
     if (priceTrailRef.current.length > 20) priceTrailRef.current = priceTrailRef.current.slice(-20);
     setPriceTrail([...priceTrailRef.current]);
   }, [lastPrice]);
+
+  // Zoom (scroll wheel)
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    setZoom(prev => Math.max(0.5, Math.min(5, prev + delta)));
+  };
+
+  // Pan (drag)
+  const handleMouseDown = (e) => {
+    setIsDragging(true);
+    dragStartRef.current = { y: e.clientY, panAtStart: panOffset };
+  };
+  const handleMouseMove = (e) => {
+    if (!isDragging) return;
+    const dy = e.clientY - dragStartRef.current.y;
+    const containerHeight = containerRef.current?.offsetHeight || 500;
+    const panDelta = (dy / containerHeight) * 100 / zoom;
+    setPanOffset(dragStartRef.current.panAtStart + panDelta);
+  };
+  const handleMouseUp = () => setIsDragging(false);
+
+  // Touch support
+  const handleTouchStart = (e) => {
+    const touch = e.touches[0];
+    setIsDragging(true);
+    dragStartRef.current = { y: touch.clientY, panAtStart: panOffset };
+  };
+  const handleTouchMove = (e) => {
+    if (!isDragging) return;
+    const touch = e.touches[0];
+    const dy = touch.clientY - dragStartRef.current.y;
+    const containerHeight = containerRef.current?.offsetHeight || 500;
+    const panDelta = (dy / containerHeight) * 100 / zoom;
+    setPanOffset(dragStartRef.current.panAtStart + panDelta);
+  };
+  const handleTouchEnd = () => setIsDragging(false);
+
+  // Reset view — center on current price, zoom to fit
+  const resetView = () => { setZoom(1); setPanOffset(0); };
 
   // Detect confluence (levels within 15 pts of each other)
   const confluenceLevels = useMemo(() => {
@@ -182,14 +229,20 @@ export default function LiquidityLadder() {
       markerPct = ((paddedMax - lastPrice) / totalRange) * 100;
     }
 
-    // Clamp all to 3-97% range
-    positions.forEach(p => { p.percent = Math.max(3, Math.min(97, p.percent)); });
-    if (markerPct !== null) markerPct = Math.max(2, Math.min(98, markerPct));
+    // Apply zoom and pan: transform percent into view space
+    // zoom > 1 = zoomed in (spreads things out), panOffset shifts view
+    const transformPct = (pct) => {
+      const center = 50 + panOffset;
+      return (pct - center) * zoom + 50;
+    };
+
+    positions.forEach(p => { p.percent = transformPct(p.percent); });
+    if (markerPct !== null) markerPct = transformPct(markerPct);
 
     // Price trail positions
     const trailPos = priceTrail.map(p => {
       const pct = ((paddedMax - p) / totalRange) * 100;
-      return Math.max(2, Math.min(98, pct));
+      return transformPct(pct);
     });
 
     return {
@@ -199,7 +252,7 @@ export default function LiquidityLadder() {
       bottomPrice: paddedMin,
       trailPositions: trailPos,
     };
-  }, [allLevels, lastPrice, priceTrail]);
+  }, [allLevels, lastPrice, priceTrail, zoom, panOffset]);
 
   if (allLevels.length === 0 && lastPrice <= 0) {
     return (
@@ -217,7 +270,29 @@ export default function LiquidityLadder() {
   const drawColor = drawDirection?.includes('Up') ? 'text-cyan-400' : drawDirection?.includes('Down') ? 'text-orange-400' : '';
 
   return (
-    <div className="h-full relative overflow-visible">
+    <div
+      ref={containerRef}
+      className={cn('h-full relative overflow-hidden select-none', isDragging && 'cursor-grabbing')}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+    >
+      {/* Zoom controls */}
+      <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1">
+        <button onClick={() => setZoom(prev => Math.min(5, prev + 0.3))}
+          className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">+</button>
+        <button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.3))}
+          className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">−</button>
+        <button onClick={resetView}
+          className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
+        <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
+      </div>
       {/* Background gradient — green above price, red below */}
       {priceMarkerPercent !== null && (
         <>
