@@ -10,12 +10,14 @@ import { getStrengthConfig } from '@/lib/constants';
  * Sweep status: Untouched = solid, Tested = dashed border, Swept = faded + strikethrough.
  */
 
-function PriceMarker({ percent }) {
+function PriceMarker({ percent, price }) {
   return (
     <div className="absolute left-0 right-0 flex items-center z-10" style={{ top: `${percent}%`, transform: 'translateY(-50%)' }}>
       <div className="w-3 h-3 bg-white rotate-45 transform -translate-x-0.5 border border-slate-400 shadow-sm shadow-white/20" />
       <div className="flex-1 h-px bg-white/40 border-t border-dashed border-white/30" />
-      <span className="text-[9px] text-white/70 font-mono ml-1 whitespace-nowrap">LAST</span>
+      <span className="text-[9px] text-white/90 font-mono ml-1 whitespace-nowrap bg-terminal-surface/80 px-1 rounded">
+        {price > 0 ? price.toFixed(2) : 'LAST'}
+      </span>
     </div>
   );
 }
@@ -113,16 +115,22 @@ export default function LiquidityLadder() {
     const rawRange = maxP - minP;
 
     // Add 15% padding top and bottom
-    const padding = Math.max(rawRange * 0.15, 1); // at least 1 point padding
+    const padding = Math.max(rawRange * 0.15, 1);
     const paddedMax = maxP + padding;
     const paddedMin = minP - padding;
     const totalRange = paddedMax - paddedMin;
 
-    // Calculate raw proportional positions (0% = top, 100% = bottom)
+    // Calculate raw proportional positions for levels AND price marker
     let rawPositions = filteredLevels.map((level) => {
       const pct = ((paddedMax - level.price) / totalRange) * 100;
-      return { level, percent: pct };
+      return { level, percent: pct, isMarker: false };
     });
+
+    // Add price marker as a virtual position
+    let rawMarkerPct = null;
+    if (lastPrice > 0) {
+      rawMarkerPct = ((paddedMax - lastPrice) / totalRange) * 100;
+    }
 
     // Sort by percent (top to bottom)
     rawPositions.sort((a, b) => a.percent - b.percent);
@@ -138,26 +146,33 @@ export default function LiquidityLadder() {
 
     // If positions overflowed past 95%, compress everything proportionally
     const lastPct = rawPositions[rawPositions.length - 1]?.percent || 0;
+    const firstPct = rawPositions[0]?.percent || 0;
+
+    // Build a mapping from raw percent to final percent so we can transform the marker too
+    let scale = 1, offset = 0;
+
     if (lastPct > 94) {
-      const scale = 94 / lastPct;
+      scale = 94 / lastPct;
+      offset = 3;
       rawPositions = rawPositions.map((p) => ({
         ...p,
-        percent: 3 + p.percent * scale, // start at 3%, scale to fit within 3%-97%
+        percent: offset + p.percent * scale,
       }));
     } else {
-      // Center the positions within 3%-97% range
-      const currentMin = rawPositions[0]?.percent || 0;
-      const currentMax = rawPositions[rawPositions.length - 1]?.percent || 0;
-      const currentSpan = currentMax - currentMin;
-      const availableSpan = 94; // 3% to 97%
-      const offset = 3 + (availableSpan - currentSpan) / 2 - currentMin;
+      const currentSpan = lastPct - firstPct;
+      const availableSpan = 94;
+      offset = 3 + (availableSpan - currentSpan) / 2 - firstPct;
       rawPositions = rawPositions.map((p) => ({ ...p, percent: Math.max(3, Math.min(97, p.percent + offset)) }));
     }
 
-    // Price marker position
+    // Apply same transformation to price marker
     let markerPct = null;
-    if (lastPrice > 0) {
-      markerPct = ((paddedMax - lastPrice) / totalRange) * 100;
+    if (rawMarkerPct !== null) {
+      if (lastPct > 94) {
+        markerPct = 3 + rawMarkerPct * scale;
+      } else {
+        markerPct = rawMarkerPct + offset;
+      }
       markerPct = Math.max(2, Math.min(98, markerPct));
     }
 
@@ -207,7 +222,7 @@ export default function LiquidityLadder() {
 
         {/* Current Price Marker */}
         {priceMarkerPercent !== null && (
-          <PriceMarker percent={priceMarkerPercent} />
+          <PriceMarker percent={priceMarkerPercent} price={lastPrice} />
         )}
       </div>
     </div>
