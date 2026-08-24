@@ -348,7 +348,7 @@ export default function LiquidityLadder() {
             const timeMax = Math.max(...times);
             const timeRange = timeMax - timeMin || 1;
 
-            // Map each point to SVG coordinates
+            // Use the LADDER's price range for Y-axis (aligns with rungs)
             const allPrices = [...allLevels.map(l => l.price), ...priceLine.map(p => p.price)];
             if (lastPrice > 0) allPrices.push(lastPrice);
             const maxP = Math.max(...allPrices);
@@ -358,8 +358,22 @@ export default function LiquidityLadder() {
             const paddedMax = maxP + padding;
             const totalRange = paddedMax - (minP - padding);
 
+            // But also compute the LINE's own range for micro-movement enhancement
+            const linePrices = priceLine.map(p => p.price);
+            const lineMax = Math.max(...linePrices);
+            const lineMin = Math.min(...linePrices);
+            const lineRange = lineMax - lineMin;
+
+            // Enhancement factor: if line range is < 5% of ladder range, magnify
+            // This makes small movements visible while keeping alignment correct
+            const ladderSpan = totalRange;
+            const enhance = lineRange < ladderSpan * 0.05 ? Math.min(ladderSpan * 0.05 / (lineRange || 1), 10) : 1;
+            const lineCenter = (lineMax + lineMin) / 2;
+
             const transformY = (price) => {
-              let pct = ((paddedMax - price) / totalRange) * 100;
+              // Magnify around the line's center price
+              const enhanced = lineCenter + (price - lineCenter) * enhance;
+              let pct = ((paddedMax - enhanced) / totalRange) * 100;
               const center = 50 + panOffset;
               return (pct - center) * zoom + 50;
             };
@@ -375,13 +389,16 @@ export default function LiquidityLadder() {
             const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
             return (
-              <path
-                d={pathD}
-                fill="none"
-                stroke="rgba(45,212,191,0.4)"
-                strokeWidth="0.5"
-                strokeLinejoin="round"
-              />
+              <>
+                {/* Glow behind line */}
+                <path d={pathD} fill="none" stroke="rgba(45,212,191,0.15)" strokeWidth="2" strokeLinejoin="round" />
+                {/* Main line */}
+                <path d={pathD} fill="none" stroke="rgba(45,212,191,0.6)" strokeWidth="0.7" strokeLinejoin="round" />
+                {/* Current price dot at end of line */}
+                {points.length > 0 && (
+                  <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="1.5" fill="#2dd4bf" />
+                )}
+              </>
             );
           })()}
         </svg>
