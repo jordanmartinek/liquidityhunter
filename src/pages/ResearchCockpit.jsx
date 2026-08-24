@@ -14,6 +14,7 @@ import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
 import BiasScanner from '@/components/trading/BiasScanner';
 import LiveAlerts from '@/components/trading/LiveAlerts';
 import LiveIntelligence from '@/components/trading/LiveIntelligence';
+import DisplacementPanel from '@/components/trading/DisplacementPanel';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -133,6 +134,11 @@ export default function ResearchCockpit() {
                 {/* Live Intelligence (compact) */}
                 <div className="p-2 border-b border-terminal-border">
                   <LiveIntelligence />
+                </div>
+
+                {/* Displacement Detector + Auto AVWAP */}
+                <div className="p-3 border-b border-terminal-border">
+                  <DisplacementPanel />
                 </div>
 
                 {/* Draw Indicator */}

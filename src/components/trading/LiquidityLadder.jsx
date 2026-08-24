@@ -31,12 +31,17 @@ function PriceMarker({ percent, price }) {
   );
 }
 
-function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence }) {
+function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, displacementState }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
   const isSwept = level.sweep_status === 'Swept';
   const isTested = level.sweep_status === 'Tested';
   const rungWidth = 35 + level.strength * 10;
+
+  // Displacement glow states
+  const isWatching = displacementState === 'watching';
+  const isDispSwept = displacementState === 'swept';
+  const isDisplaced = displacementState === 'displaced' || displacementState === 'pullback' || displacementState === 'at_avwap';
 
   return (
     <div
@@ -64,10 +69,27 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence }) {
           <div className="absolute -left-1 w-2 h-2 rounded-full bg-amber-400/60 border border-amber-400" title="Confluence zone" />
         )}
 
+        {/* Displacement state indicator (right of confluence) */}
+        {displacementState && !isSwept && (
+          <div className={cn('absolute -left-3 w-2.5 h-2.5 rounded-full border flex items-center justify-center',
+            isWatching && 'bg-slate-500/20 border-slate-500/40',
+            isDispSwept && 'bg-amber-500/30 border-amber-500/50 animate-ping',
+            isDisplaced && 'bg-cyan-500/30 border-cyan-500/50',
+          )} title={`Displacement: ${displacementState}`}>
+            <span className="text-[6px]">
+              {isWatching && '👁'}
+              {isDispSwept && '💥'}
+              {isDisplaced && '⚡'}
+            </span>
+          </div>
+        )}
+
         <div
           className={cn('h-5 rounded-sm flex items-center justify-between px-1.5 transition-all',
             isSwept ? 'opacity-20' : isTested ? 'opacity-65' : 'opacity-100',
-            isImminent && !isSwept && 'ring-1 ring-red-400/50 shadow-sm shadow-red-400/20'
+            isImminent && !isSwept && 'ring-1 ring-red-400/50 shadow-sm shadow-red-400/20',
+            isDisplaced && !isSwept && 'ring-1 ring-cyan-400/40 shadow-sm shadow-cyan-400/20',
+            isDispSwept && !isSwept && 'ring-1 ring-amber-400/40 shadow-sm shadow-amber-400/20',
           )}
           style={{
             width: `${rungWidth}%`,
@@ -122,7 +144,7 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence }) {
 }
 
 export default function LiquidityLadder() {
-  const { getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive } = useResearch();
+  const { getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive, displacements, watchingLevels } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
   const [priceTrail, setPriceTrail] = useState([]);
@@ -427,6 +449,11 @@ export default function LiquidityLadder() {
           const isImminent = lastPrice > 0 && Math.abs(distanceFromPrice) <= 5;
           const isConfluence = confluenceLevels.has(level.id);
 
+          // Check if this level has an active displacement state
+          const watchState = watchingLevels?.find(w => w.levelId === level.id);
+          const dispState = displacements?.find(d => d.levelId === level.id && d.isActive);
+          const displacementState = dispState?.state || watchState?.state || null;
+
           return (
             <Rung
               key={level.id}
@@ -435,7 +462,50 @@ export default function LiquidityLadder() {
               distanceFromPrice={distanceFromPrice}
               isImminent={isImminent}
               isConfluence={isConfluence}
+              displacementState={displacementState}
             />
+          );
+        })}
+
+        {/* AVWAP Lines from active displacements */}
+        {displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
+          // Use same price-to-percent transform as the rungs
+          const allPrices = allLevels.map(l => l.price);
+          if (lastPrice > 0) allPrices.push(lastPrice);
+          const maxP = Math.max(...allPrices);
+          const minP = Math.min(...allPrices);
+          const rawRange = maxP - minP;
+          const padding = Math.max(rawRange * 0.12, 5);
+          const paddedMax = maxP + padding;
+          const totalRange = paddedMax - (minP - padding);
+
+          let pct = ((paddedMax - disp.avwapValue) / totalRange) * 100;
+          const center = 50 + panOffset;
+          const avwapPercent = (pct - center) * zoom + 50;
+
+          const isBullish = disp.direction === 'bullish';
+          const isEntry = disp.state === 'at_avwap';
+
+          return (
+            <div
+              key={`avwap-${disp.id}`}
+              className="absolute left-0 right-0 flex items-center z-[15] pointer-events-none"
+              style={{ top: `${avwapPercent}%`, transform: 'translateY(-50%)' }}
+            >
+              {/* AVWAP dashed line */}
+              <div className={cn('flex-1 border-t-[1.5px] border-dashed',
+                isEntry ? 'border-emerald-400 animate-pulse' :
+                isBullish ? 'border-purple-400/60' : 'border-purple-400/60'
+              )} />
+              {/* AVWAP label */}
+              <span className={cn(
+                'text-[8px] font-mono px-1.5 py-0.5 rounded-sm ml-0.5 whitespace-nowrap',
+                isEntry ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' :
+                'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+              )}>
+                AVWAP {disp.avwapValue.toFixed(1)}
+              </span>
+            </div>
           );
         })}
 

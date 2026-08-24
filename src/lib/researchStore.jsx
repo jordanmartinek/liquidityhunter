@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import db, { ENTITIES } from './db';
 import { INSTRUMENTS, TIMEFRAMES } from './constants';
+import { displacementDetector, DISPLACEMENT_STATES } from './displacementDetector';
 
 const ResearchContext = createContext(null);
 
@@ -178,6 +179,81 @@ export function ResearchProvider({ children }) {
     });
   }, [lastPrice, isLive]);
 
+  // ─── Displacement Detector Integration ────────────────────────
+  const [displacements, setDisplacements] = useState([]);
+  const [watchingLevels, setWatchingLevels] = useState([]);
+  const [displacementAlerts, setDisplacementAlerts] = useState([]);
+  const detectorRef = useRef(displacementDetector);
+
+  // Subscribe to displacement events
+  useEffect(() => {
+    const detector = detectorRef.current;
+
+    const unsubscribe = detector.subscribe((event, data) => {
+      // Update state on any event
+      const state = detector.getState();
+      setDisplacements([...state.activeDisplacements]);
+      setWatchingLevels([...state.watchingLevels]);
+
+      // Emit alerts for key events
+      if (event === 'displacement' || event === 'at_avwap' || event === 'invalidated') {
+        setDisplacementAlerts(prev => {
+          const alert = {
+            id: `alert_${Date.now()}`,
+            event,
+            data,
+            time: Date.now(),
+            dismissed: false,
+          };
+          const updated = [alert, ...prev].slice(0, 20); // Keep last 20
+          return updated;
+        });
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Feed price ticks and run analysis
+  useEffect(() => {
+    if (!isLive || lastPrice <= 0) return;
+
+    const detector = detectorRef.current;
+    const now = Date.now();
+
+    // Feed tick
+    detector.addTick(lastPrice, now);
+
+    // Analyze all active levels
+    const activeLevels = levels.filter(l => l.sweep_status !== 'Swept');
+    detector.analyze(activeLevels, lastPrice, now);
+
+    // Sync state
+    const state = detector.getState();
+    setDisplacements([...state.activeDisplacements]);
+    setWatchingLevels([...state.watchingLevels]);
+  }, [lastPrice, isLive, levels]);
+
+  // Dismiss a displacement
+  const dismissDisplacement = useCallback((id) => {
+    detectorRef.current.dismiss(id);
+    const state = detectorRef.current.getState();
+    setDisplacements([...state.activeDisplacements]);
+  }, []);
+
+  // Dismiss an alert
+  const dismissAlert = useCallback((alertId) => {
+    setDisplacementAlerts(prev => prev.filter(a => a.id !== alertId));
+  }, []);
+
+  // Reset detector
+  const resetDisplacementDetector = useCallback(() => {
+    detectorRef.current.reset();
+    setDisplacements([]);
+    setWatchingLevels([]);
+    setDisplacementAlerts([]);
+  }, []);
+
   // ─── Computed Stats ───────────────────────────────────────────
   const totalLevels = levels.length;
   const untouchedCount = levels.filter((l) => l.sweep_status === 'Untouched').length;
@@ -228,6 +304,14 @@ export function ResearchProvider({ children }) {
     sweptCount,
     bslCount,
     sslCount,
+
+    // Displacement Detector
+    displacements,
+    watchingLevels,
+    displacementAlerts,
+    dismissDisplacement,
+    dismissAlert,
+    resetDisplacementDetector,
 
     // Helpers
     getToday,
