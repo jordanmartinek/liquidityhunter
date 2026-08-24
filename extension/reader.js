@@ -87,16 +87,14 @@ let lastPrice = null;
 function poll() {
   const price = extractPrice();
   if (price !== null) {
-    if (price !== lastPrice) {
-      // Send to background script which injects into app tabs
-      chrome.runtime.sendMessage({
-        type: 'PRICE_UPDATE',
-        price,
-        timestamp: Date.now(),
-        source: 'tradingview',
-      });
-      lastPrice = price;
-    }
+    // Always send — even if price hasn't changed — so app knows we're alive
+    chrome.runtime.sendMessage({
+      type: 'PRICE_UPDATE',
+      price,
+      timestamp: Date.now(),
+      source: 'tradingview',
+    });
+    lastPrice = price;
     showStatus(true, price);
   } else {
     showStatus(false);

@@ -10,7 +10,7 @@ function getToday() {
 }
 
 const LIVE_PRICE_KEY = 'lh_live_price';
-const LIVE_PRICE_STALE = 10000; // 10 seconds
+const LIVE_PRICE_STALE = 30000; // 30 seconds
 
 export function ResearchProvider({ children }) {
   // ─── Symbol ───────────────────────────────────────────────────
