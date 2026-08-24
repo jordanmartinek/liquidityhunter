@@ -182,18 +182,37 @@ export default function LiquidityLadder() {
     // Sort
     rawPositions.sort((a, b) => a.percent - b.percent);
 
-    // Min spacing (only for non-swept)
+    // Min spacing — but NEVER cross the price marker boundary
+    // Levels above price must stay above marker, below must stay below
     const MIN_GAP = 5;
-    for (let i = 1; i < rawPositions.length; i++) {
-      if (rawPositions[i].level.sweep_status === 'Swept') continue;
-      const prevNonSwept = rawPositions.slice(0, i).reverse().find(p => p.level.sweep_status !== 'Swept');
-      if (prevNonSwept) {
-        const gap = rawPositions[i].percent - prevNonSwept.percent;
-        if (gap < MIN_GAP) {
-          rawPositions[i].percent = prevNonSwept.percent + MIN_GAP;
-        }
+
+    // Split into above-price and below-price groups
+    const abovePrice = rawPositions.filter(p => p.level.price > lastPrice || lastPrice <= 0);
+    const belowPrice = rawPositions.filter(p => p.level.price <= lastPrice && lastPrice > 0);
+
+    // Enforce min gap within each group (top-down for above, bottom-up for below)
+    for (let i = 1; i < abovePrice.length; i++) {
+      if (abovePrice[i].level.sweep_status === 'Swept') continue;
+      const prev = abovePrice[i - 1];
+      if (prev.level.sweep_status === 'Swept') continue;
+      const gap = abovePrice[i].percent - prev.percent;
+      if (gap < MIN_GAP) {
+        abovePrice[i].percent = prev.percent + MIN_GAP;
       }
     }
+
+    for (let i = 1; i < belowPrice.length; i++) {
+      if (belowPrice[i].level.sweep_status === 'Swept') continue;
+      const prev = belowPrice[i - 1];
+      if (prev.level.sweep_status === 'Swept') continue;
+      const gap = belowPrice[i].percent - prev.percent;
+      if (gap < MIN_GAP) {
+        belowPrice[i].percent = prev.percent + MIN_GAP;
+      }
+    }
+
+    // Recombine and sort
+    rawPositions = [...abovePrice, ...belowPrice].sort((a, b) => a.percent - b.percent);
 
     // Scale/center
     const firstPct = rawPositions[0]?.percent || 0;
