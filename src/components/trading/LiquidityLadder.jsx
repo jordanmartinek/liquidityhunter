@@ -153,7 +153,7 @@ export default function LiquidityLadder() {
   // Include swept levels as ghost rungs
   const allLevels = filteredLevels; // Already includes swept from getFilteredLevels
 
-  // Compute positions
+  // Compute positions — PURE proportional, no spacing tricks
   const { positions, priceMarkerPercent, topPrice, bottomPrice, trailPositions } = useMemo(() => {
     if (allLevels.length === 0) {
       return { positions: [], priceMarkerPercent: lastPrice > 0 ? 50 : null, topPrice: 0, bottomPrice: 0, trailPositions: [] };
@@ -161,7 +161,6 @@ export default function LiquidityLadder() {
 
     const allPrices = allLevels.map((l) => l.price);
     if (lastPrice > 0) allPrices.push(lastPrice);
-    priceTrail.forEach(p => allPrices.push(p));
 
     const maxP = Math.max(...allPrices);
     const minP = Math.min(...allPrices);
@@ -171,80 +170,30 @@ export default function LiquidityLadder() {
     const paddedMin = minP - padding;
     const totalRange = paddedMax - paddedMin;
 
-    // Raw positions
-    let rawPositions = allLevels.map((level) => ({
+    // Pure proportional positions — higher price = lower percent (top of screen)
+    const positions = allLevels.map((level) => ({
       level,
       percent: ((paddedMax - level.price) / totalRange) * 100,
     }));
 
-    let rawMarkerPct = lastPrice > 0 ? ((paddedMax - lastPrice) / totalRange) * 100 : null;
-
-    // Sort
-    rawPositions.sort((a, b) => a.percent - b.percent);
-
-    // Min spacing — but NEVER cross the price marker boundary
-    // Levels above price must stay above marker, below must stay below
-    const MIN_GAP = 5;
-
-    // Split into above-price and below-price groups
-    const abovePrice = rawPositions.filter(p => p.level.price > lastPrice || lastPrice <= 0);
-    const belowPrice = rawPositions.filter(p => p.level.price <= lastPrice && lastPrice > 0);
-
-    // Enforce min gap within each group (top-down for above, bottom-up for below)
-    for (let i = 1; i < abovePrice.length; i++) {
-      if (abovePrice[i].level.sweep_status === 'Swept') continue;
-      const prev = abovePrice[i - 1];
-      if (prev.level.sweep_status === 'Swept') continue;
-      const gap = abovePrice[i].percent - prev.percent;
-      if (gap < MIN_GAP) {
-        abovePrice[i].percent = prev.percent + MIN_GAP;
-      }
-    }
-
-    for (let i = 1; i < belowPrice.length; i++) {
-      if (belowPrice[i].level.sweep_status === 'Swept') continue;
-      const prev = belowPrice[i - 1];
-      if (prev.level.sweep_status === 'Swept') continue;
-      const gap = belowPrice[i].percent - prev.percent;
-      if (gap < MIN_GAP) {
-        belowPrice[i].percent = prev.percent + MIN_GAP;
-      }
-    }
-
-    // Recombine and sort
-    rawPositions = [...abovePrice, ...belowPrice].sort((a, b) => a.percent - b.percent);
-
-    // Scale/center
-    const firstPct = rawPositions[0]?.percent || 0;
-    const lastPct = rawPositions[rawPositions.length - 1]?.percent || 0;
-    let scale = 1, offset = 0;
-
-    if (lastPct > 92) {
-      scale = 92 / lastPct;
-      offset = 4;
-      rawPositions = rawPositions.map(p => ({ ...p, percent: offset + p.percent * scale }));
-    } else {
-      const span = lastPct - firstPct;
-      offset = 4 + (92 - span) / 2 - firstPct;
-      rawPositions = rawPositions.map(p => ({ ...p, percent: Math.max(3, Math.min(97, p.percent + offset)) }));
-    }
-
-    // Transform marker
+    // Price marker uses the SAME formula
     let markerPct = null;
-    if (rawMarkerPct !== null) {
-      markerPct = lastPct > 92 ? offset + rawMarkerPct * scale : rawMarkerPct + offset;
-      markerPct = Math.max(2, Math.min(98, markerPct));
+    if (lastPrice > 0) {
+      markerPct = ((paddedMax - lastPrice) / totalRange) * 100;
     }
+
+    // Clamp all to 3-97% range
+    positions.forEach(p => { p.percent = Math.max(3, Math.min(97, p.percent)); });
+    if (markerPct !== null) markerPct = Math.max(2, Math.min(98, markerPct));
 
     // Price trail positions
     const trailPos = priceTrail.map(p => {
-      let pct = ((paddedMax - p) / totalRange) * 100;
-      pct = lastPct > 92 ? offset + pct * scale : pct + offset;
+      const pct = ((paddedMax - p) / totalRange) * 100;
       return Math.max(2, Math.min(98, pct));
     });
 
     return {
-      positions: rawPositions,
+      positions,
       priceMarkerPercent: markerPct,
       topPrice: paddedMax,
       bottomPrice: paddedMin,
