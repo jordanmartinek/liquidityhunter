@@ -341,17 +341,14 @@ export default function LiquidityLadder() {
 
       {/* Price Line Chart — SVG overlay showing price progression */}
       {priceLine.length > 5 && (
-        <svg className="absolute inset-0 top-5 bottom-5 left-14 right-8 pointer-events-none z-5 overflow-visible" preserveAspectRatio="none">
+        <svg className="absolute inset-0 pointer-events-none z-[6]" style={{ top: '20px', bottom: '20px', left: '0', right: '0' }} viewBox="0 0 100 100" preserveAspectRatio="none">
           {(() => {
-            const svgWidth = 100; // percentage-based
-            const svgHeight = 100;
             const times = priceLine.map(p => p.time);
             const timeMin = Math.min(...times);
             const timeMax = Math.max(...times);
             const timeRange = timeMax - timeMin || 1;
 
             // Map each point to SVG coordinates
-            // X = time (left to right), Y = price (using same transform as levels)
             const allPrices = [...allLevels.map(l => l.price), ...priceLine.map(p => p.price)];
             if (lastPrice > 0) allPrices.push(lastPrice);
             const maxP = Math.max(...allPrices);
@@ -368,10 +365,10 @@ export default function LiquidityLadder() {
             };
 
             const points = priceLine.map(p => {
-              const x = ((p.time - timeMin) / timeRange) * svgWidth;
+              const x = ((p.time - timeMin) / timeRange) * 100;
               const y = transformY(p.price);
               return { x, y };
-            }).filter(p => p.y >= -20 && p.y <= 120); // Only visible points
+            });
 
             if (points.length < 2) return null;
 
@@ -381,9 +378,9 @@ export default function LiquidityLadder() {
               <path
                 d={pathD}
                 fill="none"
-                stroke="rgba(255,255,255,0.25)"
-                strokeWidth="1.5"
-                vectorEffect="non-scaling-stroke"
+                stroke="rgba(45,212,191,0.4)"
+                strokeWidth="0.5"
+                strokeLinejoin="round"
               />
             );
           })()}
