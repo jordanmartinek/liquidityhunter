@@ -30,18 +30,8 @@ function playAlertSound() {
 export default function LiveAlerts() {
   const { levels, lastPrice, isLive } = useResearch();
   const [alerts, setAlerts] = useState([]);
-  const [visibleIndex, setVisibleIndex] = useState(0);
   const lastAlertRef = useRef({});
   const sfpCandidatesRef = useRef({});
-
-  // Cycle through alerts every 3 seconds
-  useEffect(() => {
-    if (alerts.length <= 1) return;
-    const interval = setInterval(() => {
-      setVisibleIndex(prev => (prev + 1) % alerts.length);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [alerts.length]);
 
   // Alert engine
   useEffect(() => {
@@ -147,20 +137,19 @@ export default function LiveAlerts() {
 
   if (!isLive || alerts.length === 0) return null;
 
-  const currentAlert = alerts[visibleIndex % alerts.length];
-
   return (
-    <div className="flex items-center gap-2 w-full min-w-0">
-      {/* Alert count badge */}
-      {alerts.length > 1 && (
-        <span className="text-[8px] bg-zinc-700 text-zinc-400 px-1 py-0.5 rounded tabular-nums shrink-0">
-          {visibleIndex + 1}/{alerts.length}
+    <div className="flex items-center gap-1.5 w-full min-w-0 overflow-x-auto scrollbar-none">
+      {alerts.map((alert, i) => (
+        <span key={alert.id} className={cn('text-[9px] font-medium whitespace-nowrap px-1.5 py-0.5 rounded border shrink-0',
+          alert.priority >= 5 ? 'bg-teal-500/10 border-teal-500/30' :
+          alert.priority >= 3 ? 'bg-red-500/5 border-red-500/20' :
+          alert.priority >= 2 ? 'bg-orange-500/5 border-orange-500/20' :
+          'bg-amber-500/5 border-amber-500/20',
+          alert.color
+        )}>
+          {alert.text}
         </span>
-      )}
-      {/* Current alert text */}
-      <span className={cn('text-[9px] font-medium truncate', currentAlert?.color || 'text-slate-400')}>
-        {currentAlert?.text || ''}
-      </span>
+      ))}
     </div>
   );
 }
