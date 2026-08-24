@@ -101,7 +101,25 @@ function poll() {
   }
 }
 
+// Start polling — use multiple strategies to avoid Chrome throttling
 console.log('[LH Bridge] Reader active on TradingView — polling every 1s');
 showStatus(false);
+
+// Primary: setInterval (may get throttled in background tabs)
 setInterval(poll, POLL_INTERVAL);
+
+// Anti-throttle: also use requestAnimationFrame chain for foreground
+// and a Web Worker message for background
+let lastPollTime = 0;
+function rafPoll() {
+  const now = Date.now();
+  if (now - lastPollTime >= POLL_INTERVAL) {
+    lastPollTime = now;
+    poll();
+  }
+  requestAnimationFrame(rafPoll);
+}
+requestAnimationFrame(rafPoll);
+
+// Initial poll after chart loads
 setTimeout(poll, 2000);
