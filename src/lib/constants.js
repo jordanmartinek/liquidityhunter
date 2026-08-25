@@ -28,6 +28,8 @@ export const POOL_TYPES = [
   'PWL',
   'PMH',
   'PML',
+  'VAH',
+  'VAL',
   'All-Time High',
   'All-Time Low',
   'Psychological',
