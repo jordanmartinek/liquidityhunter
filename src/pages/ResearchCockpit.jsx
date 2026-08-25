@@ -15,6 +15,7 @@ import BiasScanner from '@/components/trading/BiasScanner';
 import LiveAlerts from '@/components/trading/LiveAlerts';
 import LiveIntelligence from '@/components/trading/LiveIntelligence';
 import DisplacementPanel from '@/components/trading/DisplacementPanel';
+import SessionLevelsToggle from '@/components/trading/SessionLevelsToggle';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -139,6 +140,11 @@ export default function ResearchCockpit() {
                 {/* Displacement Detector + Auto AVWAP */}
                 <div className="p-3 border-b border-terminal-border">
                   <DisplacementPanel />
+                </div>
+
+                {/* Session Levels (Auto Asia/London H/L) */}
+                <div className="p-3 border-b border-terminal-border">
+                  <SessionLevelsToggle />
                 </div>
 
                 {/* Draw Indicator */}

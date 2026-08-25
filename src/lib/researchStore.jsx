@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import db, { ENTITIES } from './db';
 import { INSTRUMENTS, TIMEFRAMES } from './constants';
 import { displacementDetector, DISPLACEMENT_STATES } from './displacementDetector';
+import { sessionLevelEngine, SessionLevelEngine } from './sessionLevels';
 
 const ResearchContext = createContext(null);
 
@@ -254,6 +255,74 @@ export function ResearchProvider({ children }) {
     setDisplacementAlerts([]);
   }, []);
 
+  // ─── Session Levels Engine (Auto London/Asia H/L) ─────────────
+  const sessionEngineRef = useRef(sessionLevelEngine);
+  const [sessionLevelsState, setSessionLevelsState] = useState(() => sessionLevelEngine.getState());
+  const [sessionLevelsEnabled, setSessionLevelsEnabled] = useState(() => SessionLevelEngine.isEnabled());
+
+  // Toggle session levels
+  const toggleSessionLevels = useCallback((enabled) => {
+    SessionLevelEngine.setEnabled(enabled);
+    setSessionLevelsEnabled(enabled);
+    if (!enabled) {
+      // Remove any active session levels immediately
+      const engine = sessionEngineRef.current;
+      const idsToRemove = engine.getLevelIdsToRemove();
+      idsToRemove.forEach(id => removeLevel(id));
+      engine.markRemoved();
+      setSessionLevelsState(engine.getState());
+    }
+  }, [removeLevel]);
+
+  // Feed ticks to session engine & check schedule
+  useEffect(() => {
+    if (!isLive || lastPrice <= 0 || !sessionLevelsEnabled) return;
+
+    const engine = sessionEngineRef.current;
+    const now = Date.now();
+
+    // Feed tick (accumulates H/L during Asia & London)
+    engine.addTick(lastPrice, now);
+
+    // Check schedule
+    const action = engine.checkSchedule(now);
+
+    if (action === 'add') {
+      // Add session levels to the ladder
+      const levelsToAdd = engine.getLevelsToAdd(symbol);
+      const addedIds = [];
+
+      levelsToAdd.forEach(levelData => {
+        const created = addLevel(levelData);
+        if (created && created.id) {
+          addedIds.push(created.id);
+        }
+      });
+
+      if (addedIds.length > 0) {
+        engine.markAdded(addedIds);
+      }
+    } else if (action === 'remove') {
+      // Remove session levels from the ladder
+      const idsToRemove = engine.getLevelIdsToRemove();
+      idsToRemove.forEach(id => removeLevel(id));
+      engine.markRemoved();
+    }
+
+    // Sync state for UI
+    setSessionLevelsState(engine.getState());
+  }, [lastPrice, isLive, sessionLevelsEnabled, symbol, addLevel, removeLevel]);
+
+  // Reset session levels (manual)
+  const resetSessionLevels = useCallback(() => {
+    const engine = sessionEngineRef.current;
+    // Remove any active levels first
+    const idsToRemove = engine.getLevelIdsToRemove();
+    idsToRemove.forEach(id => removeLevel(id));
+    engine.reset();
+    setSessionLevelsState(engine.getState());
+  }, [removeLevel]);
+
   // ─── Computed Stats ───────────────────────────────────────────
   const totalLevels = levels.length;
   const untouchedCount = levels.filter((l) => l.sweep_status === 'Untouched').length;
@@ -312,6 +381,12 @@ export function ResearchProvider({ children }) {
     dismissDisplacement,
     dismissAlert,
     resetDisplacementDetector,
+
+    // Session Levels (Auto Asia/London H/L)
+    sessionLevelsState,
+    sessionLevelsEnabled,
+    toggleSessionLevels,
+    resetSessionLevels,
 
     // Helpers
     getToday,

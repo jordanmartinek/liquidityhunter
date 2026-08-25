@@ -36,6 +36,8 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
   const isBSL = level.side === 'Buy-Side';
   const isSwept = level.sweep_status === 'Swept';
   const isTested = level.sweep_status === 'Tested';
+  const isAutoSession = level.auto_session === true;
+  const sessionTag = level.session_type; // asia_high, asia_low, london_high, london_low
   const rungWidth = 35 + level.strength * 10;
 
   // Displacement glow states
@@ -90,18 +92,27 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
             isImminent && !isSwept && 'ring-1 ring-red-400/50 shadow-sm shadow-red-400/20',
             isDisplaced && !isSwept && 'ring-1 ring-cyan-400/40 shadow-sm shadow-cyan-400/20',
             isDispSwept && !isSwept && 'ring-1 ring-amber-400/40 shadow-sm shadow-amber-400/20',
+            isAutoSession && !isSwept && 'ring-1 ring-violet-400/30',
           )}
           style={{
             width: `${rungWidth}%`,
-            backgroundColor: isSwept ? 'rgba(39,39,42,0.3)' : strength.bgColor,
+            backgroundColor: isSwept ? 'rgba(39,39,42,0.3)' : isAutoSession ? 'rgba(139,92,246,0.15)' : strength.bgColor,
             borderWidth: '1.5px',
-            borderStyle: isSwept ? 'dashed' : isTested ? 'dashed' : 'solid',
-            borderColor: isSwept ? '#3f3f46' : strength.color,
+            borderStyle: isSwept ? 'dashed' : isTested ? 'dashed' : isAutoSession ? 'dotted' : 'solid',
+            borderColor: isSwept ? '#3f3f46' : isAutoSession ? '#8b5cf6' : strength.color,
           }}
         >
+          {/* Auto-session badge */}
+          {isAutoSession && !isSwept && (
+            <span className={cn('text-[7px] font-bold mr-1 px-1 py-px rounded-sm',
+              sessionTag?.startsWith('asia') ? 'bg-pink-500/20 text-pink-300' : 'bg-blue-500/20 text-blue-300'
+            )}>
+              {sessionTag?.startsWith('asia') ? '🌏' : '🇬🇧'}
+            </span>
+          )}
           {/* Label */}
           <span className={cn('text-[8px] font-medium truncate', isSwept ? 'line-through text-slate-600' : '')}
-            style={{ color: isSwept ? '#52525b' : strength.color }}>
+            style={{ color: isSwept ? '#52525b' : isAutoSession ? '#a78bfa' : strength.color }}>
             {level.name || level.pool_type}
           </span>
           {/* Price */}
