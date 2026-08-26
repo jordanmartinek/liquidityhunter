@@ -21,6 +21,36 @@ import { cn } from '@/lib/utils';
 export default function ResearchCockpit() {
   const [centerView, setCenterView] = useState('chart'); // 'chart' | 'ladder'
   const [rightPanel, setRightPanel] = useState('analysis'); // 'analysis' | 'trading' | 'paper'
+  const [ladderFullscreen, setLadderFullscreen] = useState(false); // fullscreen ladder mode
+
+  // Fullscreen ladder — takes over the entire viewport
+  if (ladderFullscreen) {
+    return (
+      <div className="fixed inset-0 z-[200] bg-terminal-bg flex flex-col">
+        {/* Minimal top bar */}
+        <div className="shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-terminal-border bg-terminal-surface">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider">🪜 Ladder — Full View</span>
+            <LadderTimeframeTabs />
+          </div>
+          <div className="flex items-center gap-2">
+            <LiveAlerts />
+            <button
+              onClick={() => setLadderFullscreen(false)}
+              className="px-3 py-1 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400 hover:text-white hover:border-slate-500 transition-all"
+            >
+              ✕ Exit Fullscreen
+            </button>
+          </div>
+        </div>
+
+        {/* Full ladder */}
+        <div className="flex-1 min-h-0">
+          <LiquidityLadder />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
@@ -73,6 +103,15 @@ export default function ResearchCockpit() {
               🪜 Ladder
             </button>
             {centerView === 'ladder' && <LadderTimeframeTabs />}
+            {centerView === 'ladder' && (
+              <button
+                onClick={() => setLadderFullscreen(true)}
+                className="ml-auto px-2 py-1 rounded bg-terminal-surface border border-terminal-border text-[9px] text-slate-500 hover:text-cyan-400 hover:border-cyan-400/40 transition-all"
+                title="Expand ladder to fullscreen"
+              >
+                ⛶ Fullscreen
+              </button>
+            )}
           </div>
 
           {/* Center Content */}

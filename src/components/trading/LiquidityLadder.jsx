@@ -14,6 +14,7 @@ import {
   getTimeAtLevelPercent,
   formatTimeAtLevel,
 } from '@/lib/ladderAnalytics';
+import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 
 /**
  * LiquidityLadder v3 — full-featured vertical price visualization
@@ -818,6 +819,9 @@ export default function LiquidityLadder() {
           <PriceMarker percent={priceMarkerPercent} price={lastPrice} />
         )}
       </div>
+
+      {/* Candle-Free Intelligence Overlay */}
+      <LadderIntelligenceOverlay />
     </div>
   );
 }
