@@ -1,24 +1,38 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useResearch } from '@/lib/researchStore';
 import { getStrengthConfig } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import {
+  calculateAgeDecay,
+  calculateVelocity,
+  detectStalls,
+  updateTimeAtLevel,
+  calculateMagnetZones,
+  getMTFDepth,
+  calculateSweepProbability,
+  snapshotToPath,
+  getTimeAtLevelPercent,
+  formatTimeAtLevel,
+} from '@/lib/ladderAnalytics';
 
 /**
- * LiquidityLadder v2 — full-featured vertical price visualization
+ * LiquidityLadder v3 — full-featured vertical price visualization
  * 
- * Features:
- * 1. Distance labels (pts from current price)
- * 2. Color gradient background (green above, red below price)
- * 3. Pulse animation on imminent levels (within 5 pts)
- * 4. Draw arrow (bias direction indicator)
- * 5. Fib zone band (shaded 0.705-0.886 area)
- * 6. Confluence grouping (cluster indicator)
- * 7. Ghost rungs (swept levels stay faded with timestamp)
- * 8. Price trail (recent price path)
- * 9. Proportional spacing with min-gap enforcement
- * 10. Live price marker with actual number
+ * v3 Enhancements:
+ * - #8  Level Age Decay (opacity fades over time)
+ * - #9  Price Velocity Chevrons (momentum on center rail)
+ * - #10 Snap-to-Level (stall detection near levels)
+ * - #13 Candle Snapshot Thumbnails (mini chart on hover)
+ * - #12 Drag-to-Edit Price (drag rungs to adjust)
+ * - #11 Mini-Map (condensed view of all levels)
+ * - #7  Session Range Bands (Asia/London H/L shading)
+ * - #5  Time-at-Level Bars (duration indicator)
+ * - #4  Magnet Zones (cluster highlighting)
+ * - #3  MTF Depth Overlay (higher TF = thicker/brighter)
+ * - #2  Sweep Probability Score (% badge)
  */
 
+// ─── Price Marker ───────────────────────────────────────────
 function PriceMarker({ percent, price }) {
   return (
     <div className="absolute left-0 right-0 flex items-center z-20" style={{ top: `${percent}%`, transform: 'translateY(-50%)' }}>
@@ -31,30 +45,56 @@ function PriceMarker({ percent, price }) {
   );
 }
 
-function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, displacementState }) {
+// ─── Mini Snapshot SVG ──────────────────────────────────────
+function MiniSnapshot({ snapshot }) {
+  const result = snapshotToPath(snapshot, 50, 16);
+  if (!result) return null;
+  return (
+    <svg width="50" height="16" className="inline-block ml-1">
+      <path d={result.path} fill="none" stroke={result.isUp ? '#10b981' : '#ef4444'} strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+// ─── Rung Component ─────────────────────────────────────────
+function Rung({
+  level, percent, distanceFromPrice, isImminent, isConfluence,
+  displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
+  isStalling, onDragStart, isDragTarget,
+}) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
   const isSwept = level.sweep_status === 'Swept';
   const isTested = level.sweep_status === 'Tested';
   const isAutoSession = level.auto_session === true;
-  const sessionTag = level.session_type; // asia_high, asia_low, london_high, london_low
-  const rungWidth = 35 + level.strength * 10;
+  const sessionTag = level.session_type;
+
+  // MTF depth affects width
+  const baseWidth = 35 + level.strength * 10;
+  const rungWidth = Math.min(90, baseWidth * mtfDepth.heightMult);
+  const rungHeight = Math.max(18, Math.round(20 * mtfDepth.heightMult));
 
   // Displacement glow states
   const isWatching = displacementState === 'watching';
   const isDispSwept = displacementState === 'swept';
   const isDisplaced = displacementState === 'displaced' || displacementState === 'pullback' || displacementState === 'at_avwap';
 
+  // Combined opacity: age decay * base
+  const baseOpacity = isSwept ? 0.2 : isTested ? 0.65 : 1;
+  const finalOpacity = baseOpacity * ageOpacity;
+
   return (
     <div
       className={cn('absolute left-0 right-0 flex items-center group transition-all',
-        isImminent && !isSwept && 'animate-pulse'
+        isImminent && !isSwept && 'animate-pulse',
+        isStalling && !isSwept && 'ring-2 ring-yellow-400/50 rounded',
+        isDragTarget && 'ring-2 ring-teal-400/60 rounded',
       )}
-      style={{ top: `${percent}%`, transform: 'translateY(-50%)' }}
+      style={{ top: `${percent}%`, transform: 'translateY(-50%)', opacity: finalOpacity }}
     >
-      {/* Distance label (left) */}
-      <div className="w-14 shrink-0 text-right pr-1.5">
-        <span className={cn('text-[9px] tabular-nums font-mono',
+      {/* Distance + Sweep Prob (left) */}
+      <div className="w-14 shrink-0 text-right pr-1">
+        <span className={cn('text-[9px] tabular-nums font-mono block',
           isSwept ? 'text-slate-700' :
           isImminent ? 'text-red-400 font-bold' :
           Math.abs(distanceFromPrice) < 15 ? 'text-amber-400' :
@@ -62,6 +102,16 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
         )}>
           {distanceFromPrice > 0 ? '+' : ''}{distanceFromPrice.toFixed(0)}
         </span>
+        {/* Sweep probability badge */}
+        {sweepProb > 0 && !isSwept && (
+          <span className={cn('text-[7px] tabular-nums font-mono',
+            sweepProb >= 70 ? 'text-emerald-400' :
+            sweepProb >= 40 ? 'text-amber-400' :
+            'text-slate-600'
+          )}>
+            {sweepProb}%
+          </span>
+        )}
       </div>
 
       {/* Rung bar */}
@@ -71,7 +121,7 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
           <div className="absolute -left-1 w-2 h-2 rounded-full bg-amber-400/60 border border-amber-400" title="Confluence zone" />
         )}
 
-        {/* Displacement state indicator (right of confluence) */}
+        {/* Displacement state indicator */}
         {displacementState && !isSwept && (
           <div className={cn('absolute -left-3 w-2.5 h-2.5 rounded-full border flex items-center justify-center',
             isWatching && 'bg-slate-500/20 border-slate-500/40',
@@ -86,21 +136,30 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
           </div>
         )}
 
+        {/* Stall indicator */}
+        {isStalling && !isSwept && (
+          <div className="absolute -right-4 text-[8px] text-yellow-400 animate-pulse font-bold" title="Price stalling at this level">
+            ⏸
+          </div>
+        )}
+
         <div
-          className={cn('h-5 rounded-sm flex items-center justify-between px-1.5 transition-all',
-            isSwept ? 'opacity-20' : isTested ? 'opacity-65' : 'opacity-100',
+          className={cn('rounded-sm flex items-center justify-between px-1.5 transition-all cursor-grab active:cursor-grabbing',
             isImminent && !isSwept && 'ring-1 ring-red-400/50 shadow-sm shadow-red-400/20',
             isDisplaced && !isSwept && 'ring-1 ring-cyan-400/40 shadow-sm shadow-cyan-400/20',
             isDispSwept && !isSwept && 'ring-1 ring-amber-400/40 shadow-sm shadow-amber-400/20',
             isAutoSession && !isSwept && 'ring-1 ring-violet-400/30',
+            isStalling && !isSwept && 'shadow-md shadow-yellow-400/20',
           )}
           style={{
             width: `${rungWidth}%`,
+            height: `${rungHeight}px`,
             backgroundColor: isSwept ? 'rgba(39,39,42,0.3)' : isAutoSession ? 'rgba(139,92,246,0.15)' : strength.bgColor,
-            borderWidth: '1.5px',
+            borderWidth: mtfDepth.weight >= 5 ? '2px' : '1.5px',
             borderStyle: isSwept ? 'dashed' : isTested ? 'dashed' : isAutoSession ? 'dotted' : 'solid',
             borderColor: isSwept ? '#3f3f46' : isAutoSession ? '#8b5cf6' : strength.color,
           }}
+          onMouseDown={(e) => { e.stopPropagation(); onDragStart?.(e, level); }}
         >
           {/* Auto-session badge */}
           {isAutoSession && !isSwept && (
@@ -121,17 +180,34 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
           </span>
         </div>
 
-        {/* Inline hover expansion — shows full label without clipping */}
+        {/* Time-at-Level bar (below rung) */}
+        {timeAtLevel > 0 && !isSwept && (
+          <div className="absolute left-1/2 -translate-x-1/2 -bottom-1.5 h-[2px] rounded-full bg-teal-500/40 overflow-hidden"
+            style={{ width: `${Math.min(rungWidth, 60)}%` }}>
+            <div className="h-full bg-teal-400 rounded-full transition-all"
+              style={{ width: `${getTimeAtLevelPercent(timeAtLevel)}%` }} />
+          </div>
+        )}
+
+        {/* Inline hover expansion — shows full label + snapshot */}
         <div className="absolute left-14 right-8 hidden group-hover:flex items-center z-[100] bg-terminal-bg/95 backdrop-blur-sm rounded-md border border-terminal-border shadow-xl px-3 py-2"
           style={{ top: '50%', transform: 'translateY(-50%)' }}>
           <div className="space-y-0.5 w-full">
-            <div className="text-[11px] text-slate-200 font-medium whitespace-normal break-words">{level.name || level.pool_type}</div>
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-200 font-medium whitespace-normal break-words">{level.name || level.pool_type}</span>
+              {level.price_snapshot && <MiniSnapshot snapshot={level.price_snapshot} />}
+            </div>
             <div className="text-[9px] text-slate-400">
               {level.side} • {level.pool_type} • {level.timeframe} • {level.price.toFixed(2)}
             </div>
-            <div className="text-[9px] text-slate-500">
-              Strength: {strength.label} • Status: {level.sweep_status}
+            <div className="flex items-center gap-2 text-[9px] text-slate-500">
+              <span>Strength: {strength.label}</span>
+              <span>Status: {level.sweep_status}</span>
+              {sweepProb > 0 && <span className={sweepProb >= 60 ? 'text-emerald-400' : 'text-slate-500'}>Sweep: {sweepProb}%</span>}
             </div>
+            {timeAtLevel > 0 && (
+              <div className="text-[8px] text-teal-400">⏱ Time at level: {formatTimeAtLevel(timeAtLevel)}</div>
+            )}
             {isSwept && level.updated_date && (
               <div className="text-[8px] text-slate-600">Swept: {new Date(level.updated_date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
             )}
@@ -155,8 +231,62 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
   );
 }
 
+// ─── Mini-Map Component ─────────────────────────────────────
+function MiniMap({ allLevels, lastPrice, zoom, panOffset, positions }) {
+  if (allLevels.length === 0) return null;
+
+  const allPrices = allLevels.map(l => l.price);
+  if (lastPrice > 0) allPrices.push(lastPrice);
+  const maxP = Math.max(...allPrices);
+  const minP = Math.min(...allPrices);
+  const range = maxP - minP || 1;
+
+  // Viewport rectangle: what portion of the total range is visible
+  // At zoom=1 panOffset=0, viewport is 0-100%. At zoom=2, viewport is 25%-75% etc.
+  const viewportSize = 100 / zoom;
+  const viewportCenter = 50 + panOffset;
+  const viewportTop = Math.max(0, viewportCenter - viewportSize / 2);
+  const viewportBottom = Math.min(100, viewportCenter + viewportSize / 2);
+
+  return (
+    <div className="absolute top-8 right-1 w-3 bottom-8 z-20 pointer-events-none">
+      <div className="relative w-full h-full bg-slate-900/50 border border-terminal-border/30 rounded-full overflow-hidden">
+        {/* Level dots */}
+        {allLevels.map(level => {
+          const pct = ((maxP - level.price) / range) * 100;
+          const isBSL = level.side === 'Buy-Side';
+          const isSwept = level.sweep_status === 'Swept';
+          return (
+            <div key={`mm-${level.id}`}
+              className={cn('absolute left-0.5 w-1.5 h-1 rounded-full',
+                isSwept ? 'bg-slate-700' :
+                isBSL ? 'bg-cyan-400/70' : 'bg-orange-400/70'
+              )}
+              style={{ top: `${pct}%` }}
+            />
+          );
+        })}
+
+        {/* Price marker */}
+        {lastPrice > 0 && (
+          <div className="absolute left-0 w-full h-[2px] bg-white/70"
+            style={{ top: `${((maxP - lastPrice) / range) * 100}%` }} />
+        )}
+
+        {/* Viewport rectangle */}
+        <div className="absolute left-0 w-full border border-teal-400/40 bg-teal-400/5 rounded-sm"
+          style={{ top: `${viewportTop}%`, height: `${viewportBottom - viewportTop}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Main LiquidityLadder ───────────────────────────────────
 export default function LiquidityLadder() {
-  const { getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive, displacements, watchingLevels } = useResearch();
+  const {
+    getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive,
+    displacements, watchingLevels, updateLevel, sessionLevelsState,
+  } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
   const [priceTrail, setPriceTrail] = useState([]);
@@ -165,24 +295,50 @@ export default function LiquidityLadder() {
   const containerRef = useRef(null);
 
   // Zoom & Pan state
-  const [zoom, setZoom] = useState(1); // 1 = fit all, >1 = zoomed in
-  const [panOffset, setPanOffset] = useState(0); // offset in % of range
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ y: 0, panAtStart: 0 });
 
-  // Track price trail (last 20 positions)
+  // #5: Time-at-Level tracking
+  const timeAtLevelRef = useRef({});
+  const [timeAtLevel, setTimeAtLevel] = useState({});
+
+  // #10: Stall detection
+  const [stalls, setStalls] = useState([]);
+
+  // #9: Velocity
+  const [velocity, setVelocity] = useState({ speed: 0, direction: 0, chevrons: 0 });
+
+  // #12: Drag-to-edit state
+  const [dragEditLevel, setDragEditLevel] = useState(null);
+  const [dragEditY, setDragEditY] = useState(null);
+
+  // Track price trail (last 20 positions) + analytics
   useEffect(() => {
     if (lastPrice <= 0) return;
     priceTrailRef.current.push(lastPrice);
     if (priceTrailRef.current.length > 20) priceTrailRef.current = priceTrailRef.current.slice(-20);
     setPriceTrail([...priceTrailRef.current]);
 
-    // Full price line history (for line chart) — keep last 300 ticks (~5 min at 1/sec)
+    // Full price line history
     priceLineRef.current.push({ price: lastPrice, time: Date.now() });
     if (priceLineRef.current.length > 300) priceLineRef.current = priceLineRef.current.slice(-300);
-    // Only update state every 3 ticks to reduce re-renders
     if (priceLineRef.current.length % 3 === 0) {
       setPriceLine([...priceLineRef.current]);
+    }
+
+    // #9: Velocity calculation
+    setVelocity(calculateVelocity(priceLineRef.current));
+
+    // #10: Stall detection
+    const detectedStalls = detectStalls(priceLineRef.current, filteredLevels, lastPrice);
+    setStalls(detectedStalls);
+
+    // #5: Time-at-Level accumulation
+    timeAtLevelRef.current = updateTimeAtLevel(timeAtLevelRef.current, filteredLevels, lastPrice);
+    if (priceLineRef.current.length % 5 === 0) {
+      setTimeAtLevel({ ...timeAtLevelRef.current });
     }
   }, [lastPrice]);
 
@@ -193,19 +349,65 @@ export default function LiquidityLadder() {
     setZoom(prev => Math.max(0.5, Math.min(5, prev + delta)));
   };
 
-  // Pan (drag)
+  // Pan (drag) — only when not drag-editing a level
   const handleMouseDown = (e) => {
+    if (dragEditLevel) return;
     setIsDragging(true);
     dragStartRef.current = { y: e.clientY, panAtStart: panOffset };
   };
   const handleMouseMove = (e) => {
+    // #12: Drag-to-edit handling
+    if (dragEditLevel) {
+      setDragEditY(e.clientY);
+      return;
+    }
     if (!isDragging) return;
     const dy = e.clientY - dragStartRef.current.y;
     const containerHeight = containerRef.current?.offsetHeight || 500;
     const panDelta = (dy / containerHeight) * 100 / zoom;
     setPanOffset(dragStartRef.current.panAtStart + panDelta);
   };
-  const handleMouseUp = () => setIsDragging(false);
+  const handleMouseUp = (e) => {
+    // #12: Complete drag-to-edit
+    if (dragEditLevel && dragEditY !== null) {
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      if (containerRect) {
+        const relativeY = (dragEditY - containerRect.top) / containerRect.height;
+        // Convert Y position back to price
+        const allPrices = filteredLevels.map(l => l.price);
+        if (lastPrice > 0) allPrices.push(lastPrice);
+        const maxP = Math.max(...allPrices);
+        const minP = Math.min(...allPrices);
+        const rawRange = maxP - minP;
+        const padding = Math.max(rawRange * 0.12, 5);
+        const paddedMax = maxP + padding;
+        const paddedMin = minP - padding;
+        const totalRange = paddedMax - paddedMin;
+
+        // Reverse the transform: viewPct → rawPct → price
+        const viewPct = relativeY * 100;
+        const center = 50 + panOffset;
+        const rawPct = (viewPct - 50) / zoom + center;
+        const newPrice = paddedMax - (rawPct / 100) * totalRange;
+
+        // Only update if price is reasonable
+        if (newPrice > 0 && Math.abs(newPrice - dragEditLevel.price) > 0.5) {
+          updateLevel(dragEditLevel.id, { price: parseFloat(newPrice.toFixed(2)) });
+        }
+      }
+      setDragEditLevel(null);
+      setDragEditY(null);
+      return;
+    }
+    setIsDragging(false);
+  };
+
+  // #12: Start drag-to-edit
+  const handleRungDragStart = useCallback((e, level) => {
+    e.preventDefault();
+    setDragEditLevel(level);
+    setDragEditY(e.clientY);
+  }, []);
 
   // Touch support
   const handleTouchStart = (e) => {
@@ -223,7 +425,7 @@ export default function LiquidityLadder() {
   };
   const handleTouchEnd = () => setIsDragging(false);
 
-  // Reset view — center on current price, zoom to fit
+  // Reset view
   const resetView = () => { setZoom(1); setPanOffset(0); };
 
   // Detect confluence (levels within 15 pts of each other)
@@ -241,13 +443,15 @@ export default function LiquidityLadder() {
     return confluenceIds;
   }, [filteredLevels]);
 
-  // Include swept levels as ghost rungs
-  const allLevels = filteredLevels; // Already includes swept from getFilteredLevels
+  // #4: Magnet Zones
+  const magnetZones = useMemo(() => calculateMagnetZones(filteredLevels), [filteredLevels]);
 
-  // Compute positions — PURE proportional, no spacing tricks
-  const { positions, priceMarkerPercent, topPrice, bottomPrice, trailPositions } = useMemo(() => {
+  const allLevels = filteredLevels;
+
+  // Compute positions — PURE proportional
+  const { positions, priceMarkerPercent, topPrice, bottomPrice, trailPositions, paddedMax, paddedMin, totalRange } = useMemo(() => {
     if (allLevels.length === 0) {
-      return { positions: [], priceMarkerPercent: lastPrice > 0 ? 50 : null, topPrice: 0, bottomPrice: 0, trailPositions: [] };
+      return { positions: [], priceMarkerPercent: lastPrice > 0 ? 50 : null, topPrice: 0, bottomPrice: 0, trailPositions: [], paddedMax: 0, paddedMin: 0, totalRange: 1 };
     }
 
     const allPrices = allLevels.map((l) => l.price);
@@ -257,24 +461,20 @@ export default function LiquidityLadder() {
     const minP = Math.min(...allPrices);
     const rawRange = maxP - minP;
     const padding = Math.max(rawRange * 0.12, 5);
-    const paddedMax = maxP + padding;
-    const paddedMin = minP - padding;
-    const totalRange = paddedMax - paddedMin;
+    const pMax = maxP + padding;
+    const pMin = minP - padding;
+    const tRange = pMax - pMin;
 
-    // Pure proportional positions — higher price = lower percent (top of screen)
     const positions = allLevels.map((level) => ({
       level,
-      percent: ((paddedMax - level.price) / totalRange) * 100,
+      percent: ((pMax - level.price) / tRange) * 100,
     }));
 
-    // Price marker uses the SAME formula
     let markerPct = null;
     if (lastPrice > 0) {
-      markerPct = ((paddedMax - lastPrice) / totalRange) * 100;
+      markerPct = ((pMax - lastPrice) / tRange) * 100;
     }
 
-    // Apply zoom and pan: transform percent into view space
-    // zoom > 1 = zoomed in (spreads things out), panOffset shifts view
     const transformPct = (pct) => {
       const center = 50 + panOffset;
       return (pct - center) * zoom + 50;
@@ -283,20 +483,33 @@ export default function LiquidityLadder() {
     positions.forEach(p => { p.percent = transformPct(p.percent); });
     if (markerPct !== null) markerPct = transformPct(markerPct);
 
-    // Price trail positions
     const trailPos = priceTrail.map(p => {
-      const pct = ((paddedMax - p) / totalRange) * 100;
+      const pct = ((pMax - p) / tRange) * 100;
       return transformPct(pct);
     });
 
     return {
       positions,
       priceMarkerPercent: markerPct,
-      topPrice: paddedMax,
-      bottomPrice: paddedMin,
+      topPrice: pMax,
+      bottomPrice: pMin,
       trailPositions: trailPos,
+      paddedMax: pMax,
+      paddedMin: pMin,
+      totalRange: tRange,
     };
   }, [allLevels, lastPrice, priceTrail, zoom, panOffset, priceLine]);
+
+  // Price-to-percent helper (for zones/bands)
+  const priceToPercent = useCallback((price) => {
+    if (totalRange === 0) return 50;
+    const pct = ((paddedMax - price) / totalRange) * 100;
+    const center = 50 + panOffset;
+    return (pct - center) * zoom + 50;
+  }, [paddedMax, totalRange, zoom, panOffset]);
+
+  // Stall level IDs for quick lookup
+  const stallingLevelIds = useMemo(() => new Set(stalls.map(s => s.levelId)), [stalls]);
 
   if (allLevels.length === 0 && lastPrice <= 0) {
     return (
@@ -316,7 +529,10 @@ export default function LiquidityLadder() {
   return (
     <div
       ref={containerRef}
-      className={cn('h-full relative overflow-hidden select-none', isDragging && 'cursor-grabbing')}
+      className={cn('h-full relative overflow-hidden select-none',
+        isDragging && 'cursor-grabbing',
+        dragEditLevel && 'cursor-ns-resize',
+      )}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -325,7 +541,7 @@ export default function LiquidityLadder() {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      style={{ cursor: dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab' }}
     >
       {/* Zoom controls */}
       <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1">
@@ -337,6 +553,23 @@ export default function LiquidityLadder() {
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
         <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
       </div>
+
+      {/* #9: Velocity Chevrons on center rail */}
+      {velocity.chevrons > 0 && priceMarkerPercent !== null && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-15 pointer-events-none"
+          style={{ top: `${priceMarkerPercent}%`, transform: 'translateX(-50%) translateY(-50%)' }}>
+          <div className={cn('flex flex-col items-center gap-0 text-[10px] font-bold',
+            velocity.direction > 0 ? 'text-emerald-400' : 'text-red-400'
+          )}>
+            {Array.from({ length: velocity.chevrons }).map((_, i) => (
+              <span key={i} className="leading-[8px]" style={{ opacity: 0.4 + (i * 0.3) }}>
+                {velocity.direction > 0 ? '▲' : '▼'}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Background gradient — green above price, red below */}
       {priceMarkerPercent !== null && (
         <>
@@ -349,9 +582,50 @@ export default function LiquidityLadder() {
         </>
       )}
 
+      {/* #7: Session Range Bands (Asia + London) */}
+      {sessionLevelsState && sessionLevelsState.asia?.high && sessionLevelsState.asia?.low && (
+        (() => {
+          const topPct = priceToPercent(sessionLevelsState.asia.high);
+          const botPct = priceToPercent(sessionLevelsState.asia.low);
+          return (
+            <div className="absolute left-0 right-0 pointer-events-none z-[2]"
+              style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.abs(botPct - topPct)}%` }}>
+              <div className="w-full h-full bg-pink-500/5 border-y border-pink-500/15" />
+            </div>
+          );
+        })()
+      )}
+      {sessionLevelsState && sessionLevelsState.london?.high && sessionLevelsState.london?.low && (
+        (() => {
+          const topPct = priceToPercent(sessionLevelsState.london.high);
+          const botPct = priceToPercent(sessionLevelsState.london.low);
+          return (
+            <div className="absolute left-0 right-0 pointer-events-none z-[2]"
+              style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.abs(botPct - topPct)}%` }}>
+              <div className="w-full h-full bg-blue-500/5 border-y border-blue-500/15" />
+            </div>
+          );
+        })()
+      )}
+
+      {/* #4: Magnet Zone bands */}
+      {magnetZones.map(zone => {
+        const topPct = priceToPercent(zone.highPrice);
+        const botPct = priceToPercent(zone.lowPrice);
+        return (
+          <div key={zone.id} className="absolute left-10 right-10 pointer-events-none z-[3] rounded"
+            style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.max(Math.abs(botPct - topPct), 2)}%` }}>
+            <div className="w-full h-full bg-amber-500/8 border border-amber-500/20 rounded-sm" />
+            <span className="absolute -right-1 top-0 text-[6px] text-amber-400/60 font-mono">
+              🧲{zone.levelCount}
+            </span>
+          </div>
+        );
+      })}
+
       {/* Draw arrow (bias direction) */}
       {drawArrow && (
-        <div className={cn('absolute top-2 right-2 z-20 text-lg opacity-60', drawColor)}>
+        <div className={cn('absolute top-2 right-6 z-20 text-lg opacity-60', drawColor)}>
           {drawArrow}
         </div>
       )}
@@ -373,7 +647,8 @@ export default function LiquidityLadder() {
       {/* Ladder rail */}
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
 
-
+      {/* #11: Mini-Map */}
+      <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />
 
       {/* Time axis (bottom) */}
       {priceLine.length > 5 && (
@@ -413,19 +688,17 @@ export default function LiquidityLadder() {
               const timeMax = Math.max(...times);
               const timeRange = timeMax - timeMin || 1;
 
-              // Use EXACT same range calc as the rungs useMemo (no priceLine expansion)
               const allPrices = [...allLevels.map(l => l.price)];
               if (lastPrice > 0) allPrices.push(lastPrice);
               const maxP = Math.max(...allPrices);
               const minP = Math.min(...allPrices);
               const rawRange = maxP - minP;
               const padding = Math.max(rawRange * 0.12, 5);
-              const paddedMax = maxP + padding;
-              const paddedMin = minP - padding;
-              const totalRange = paddedMax - paddedMin;
+              const pMax = maxP + padding;
+              const tRange = pMax - (minP - padding);
 
               const priceToY = (price) => {
-                let pct = ((paddedMax - price) / totalRange) * 100;
+                let pct = ((pMax - price) / tRange) * 100;
                 const center = 50 + panOffset;
                 return (pct - center) * zoom + 50;
               };
@@ -466,6 +739,18 @@ export default function LiquidityLadder() {
           const dispState = displacements?.find(d => d.levelId === level.id && d.isActive);
           const displacementState = dispState?.state || watchState?.state || null;
 
+          // #8: Age decay
+          const ageOpacity = calculateAgeDecay(level);
+
+          // #3: MTF Depth
+          const mtfDepth = getMTFDepth(level.timeframe);
+
+          // #2: Sweep probability
+          const sweepProb = calculateSweepProbability(level, lastPrice, drawDirection, timeAtLevel[level.id] || 0);
+
+          // #10: Is this level stalling?
+          const isStalling = stallingLevelIds.has(level.id);
+
           return (
             <Rung
               key={level.id}
@@ -475,26 +760,20 @@ export default function LiquidityLadder() {
               isImminent={isImminent}
               isConfluence={isConfluence}
               displacementState={displacementState}
+              ageOpacity={ageOpacity}
+              mtfDepth={mtfDepth}
+              sweepProb={sweepProb}
+              timeAtLevel={timeAtLevel[level.id] || 0}
+              isStalling={isStalling}
+              onDragStart={handleRungDragStart}
+              isDragTarget={dragEditLevel?.id === level.id}
             />
           );
         })}
 
         {/* AVWAP Lines from active displacements */}
         {displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
-          // Use same price-to-percent transform as the rungs
-          const allPrices = allLevels.map(l => l.price);
-          if (lastPrice > 0) allPrices.push(lastPrice);
-          const maxP = Math.max(...allPrices);
-          const minP = Math.min(...allPrices);
-          const rawRange = maxP - minP;
-          const padding = Math.max(rawRange * 0.12, 5);
-          const paddedMax = maxP + padding;
-          const totalRange = paddedMax - (minP - padding);
-
-          let pct = ((paddedMax - disp.avwapValue) / totalRange) * 100;
-          const center = 50 + panOffset;
-          const avwapPercent = (pct - center) * zoom + 50;
-
+          const avwapPercent = priceToPercent(disp.avwapValue);
           const isBullish = disp.direction === 'bullish';
           const isEntry = disp.state === 'at_avwap';
 
@@ -504,12 +783,10 @@ export default function LiquidityLadder() {
               className="absolute left-0 right-0 flex items-center z-[15] pointer-events-none"
               style={{ top: `${avwapPercent}%`, transform: 'translateY(-50%)' }}
             >
-              {/* AVWAP dashed line */}
               <div className={cn('flex-1 border-t-[1.5px] border-dashed',
                 isEntry ? 'border-emerald-400 animate-pulse' :
                 isBullish ? 'border-purple-400/60' : 'border-purple-400/60'
               )} />
-              {/* AVWAP label */}
               <span className={cn(
                 'text-[8px] font-mono px-1.5 py-0.5 rounded-sm ml-0.5 whitespace-nowrap',
                 isEntry ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' :
@@ -520,6 +797,21 @@ export default function LiquidityLadder() {
             </div>
           );
         })}
+
+        {/* #12: Drag ghost indicator */}
+        {dragEditLevel && dragEditY !== null && containerRef.current && (() => {
+          const rect = containerRef.current.getBoundingClientRect();
+          const relPct = ((dragEditY - rect.top) / rect.height) * 100;
+          return (
+            <div className="absolute left-14 right-8 flex items-center z-[50] pointer-events-none"
+              style={{ top: `${relPct}%`, transform: 'translateY(-50%)' }}>
+              <div className="flex-1 h-[2px] bg-teal-400/60 border-dashed" />
+              <span className="text-[8px] text-teal-400 font-mono ml-1 bg-terminal-bg/80 px-1 rounded">
+                Moving: {dragEditLevel.name || dragEditLevel.pool_type}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Price Marker */}
         {priceMarkerPercent !== null && (
