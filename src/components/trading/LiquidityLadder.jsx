@@ -121,21 +121,22 @@ function Rung({ level, percent, distanceFromPrice, isImminent, isConfluence, dis
           </span>
         </div>
 
-        {/* Hover tooltip */}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 hidden group-hover:block z-50">
-          <div className="bg-terminal-surface border border-terminal-border rounded px-3 py-2 shadow-xl w-[260px]">
-            <div className="text-[10px] text-slate-300 font-medium">{level.name || level.pool_type}</div>
-            <div className="text-[9px] text-slate-500 mt-0.5">
+        {/* Inline hover expansion — shows full label without clipping */}
+        <div className="absolute left-14 right-8 hidden group-hover:flex items-center z-[100] bg-terminal-bg/95 backdrop-blur-sm rounded-md border border-terminal-border shadow-xl px-3 py-2"
+          style={{ top: '50%', transform: 'translateY(-50%)' }}>
+          <div className="space-y-0.5 w-full">
+            <div className="text-[11px] text-slate-200 font-medium whitespace-normal break-words">{level.name || level.pool_type}</div>
+            <div className="text-[9px] text-slate-400">
               {level.side} • {level.pool_type} • {level.timeframe} • {level.price.toFixed(2)}
             </div>
             <div className="text-[9px] text-slate-500">
               Strength: {strength.label} • Status: {level.sweep_status}
             </div>
             {isSwept && level.updated_date && (
-              <div className="text-[8px] text-slate-600 mt-0.5">Swept: {new Date(level.updated_date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+              <div className="text-[8px] text-slate-600">Swept: {new Date(level.updated_date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
             )}
             {level.notes && (
-              <div className="text-[9px] text-slate-400 mt-1.5 italic leading-relaxed break-words whitespace-normal border-t border-terminal-border pt-1.5">{level.notes}</div>
+              <div className="text-[9px] text-slate-400 mt-1 italic leading-relaxed break-words whitespace-normal border-t border-terminal-border pt-1">{level.notes}</div>
             )}
           </div>
         </div>

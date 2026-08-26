@@ -43,7 +43,7 @@ export default function TradingViewChart() {
           save_image: false,
           hide_side_toolbar: false,
           drawings_access: { type: 'all' },
-          studies: ['STD;Volume'],
+          studies: [],
           overrides: {
             'paneProperties.background': '#070b12',
             'paneProperties.backgroundType': 'solid',
