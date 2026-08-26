@@ -15,6 +15,9 @@ import {
   formatTimeAtLevel,
 } from '@/lib/ladderAnalytics';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
+import LadderExtrasOverlay from './LadderExtrasOverlay';
+import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity } from '@/lib/ladderExtras';
+import { ladderAudio } from '@/lib/ladderAudio';
 
 /**
  * LiquidityLadder v3 — full-featured vertical price visualization
@@ -315,6 +318,10 @@ export default function LiquidityLadder() {
   const [dragEditLevel, setDragEditLevel] = useState(null);
   const [dragEditY, setDragEditY] = useState(null);
 
+  // Heatmap + Kill Zone state
+  const [heatmapGradient, setHeatmapGradient] = useState('transparent');
+  const [killZoneOpacity, setKillZoneOpacity] = useState(1);
+
   // Track price trail (last 20 positions) + analytics
   useEffect(() => {
     if (lastPrice <= 0) return;
@@ -340,6 +347,23 @@ export default function LiquidityLadder() {
     timeAtLevelRef.current = updateTimeAtLevel(timeAtLevelRef.current, filteredLevels, lastPrice);
     if (priceLineRef.current.length % 5 === 0) {
       setTimeAtLevel({ ...timeAtLevelRef.current });
+    }
+
+    // Heatmap update (every 10 ticks)
+    if (priceLineRef.current.length % 10 === 0) {
+      const heatmap = computeLiquidityHeatmap(filteredLevels, lastPrice, drawDirection);
+      setHeatmapGradient(heatmapToGradient(heatmap));
+    }
+
+    // Kill zone opacity update (every 30 ticks)
+    if (priceLineRef.current.length % 30 === 0) {
+      const kz = getActiveKillZone();
+      setKillZoneOpacity(getKillZoneOpacity(kz));
+    }
+
+    // Audio: stall detection sounds
+    if (stalls.length > 0) {
+      stalls.forEach(s => ladderAudio.stall(s.levelId));
     }
   }, [lastPrice]);
 
@@ -542,8 +566,15 @@ export default function LiquidityLadder() {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      style={{ cursor: dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab' }}
+      style={{
+        cursor: dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
+        opacity: killZoneOpacity,
+        transition: 'opacity 2s ease',
+      }}
     >
+      {/* Liquidity Gradient Heatmap background */}
+      <div className="absolute inset-0 pointer-events-none z-[1]"
+        style={{ background: heatmapGradient }} />
       {/* Zoom controls */}
       <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1">
         <button onClick={() => setZoom(prev => Math.min(5, prev + 0.3))}
@@ -822,6 +853,9 @@ export default function LiquidityLadder() {
 
       {/* Candle-Free Intelligence Overlay */}
       <LadderIntelligenceOverlay />
+
+      {/* Extras Overlay (Audio, Kill Zone, Patience, ETAs, Compression, Replay) */}
+      <LadderExtrasOverlay />
     </div>
   );
 }
