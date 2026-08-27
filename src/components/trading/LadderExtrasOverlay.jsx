@@ -153,10 +153,13 @@ export default function LadderExtrasOverlay() {
         {/* Compact bar — always visible */}
         <div className="flex items-center gap-1.5 bg-terminal-bg/80 backdrop-blur-sm border border-terminal-border/40 rounded-md px-2 py-1">
           {/* Audio toggle */}
-          <button onClick={toggleAudio} className={cn('text-[9px] px-1 py-0.5 rounded',
-            audioEnabled ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-600'
-          )} title={audioEnabled ? 'Audio ON' : 'Audio OFF'}>
+          <button onClick={toggleAudio} className={cn('text-[9px] px-2 py-0.5 rounded flex items-center gap-1 border transition-all',
+            audioEnabled
+              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20'
+              : 'text-slate-500 bg-slate-800/50 border-slate-700 hover:text-slate-300'
+          )} title={audioEnabled ? 'Audio ON — click to mute' : 'Audio OFF — click to enable'}>
             {audioEnabled ? '🔊' : '🔇'}
+            <span className="font-medium">{audioEnabled ? 'Audio' : 'Muted'}</span>
           </button>
 
           {/* Kill Zone badge */}
