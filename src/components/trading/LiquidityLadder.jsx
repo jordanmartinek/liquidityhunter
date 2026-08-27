@@ -20,6 +20,7 @@ import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZ
 import { ladderAudio } from '@/lib/ladderAudio';
 import { alertZoneManager, fibZoneTracker } from '@/lib/bangerFeatures';
 import { hasPatternManager } from '@/lib/headAndShoulders';
+import DailyRangeMeter from './DailyRangeMeter';
 
 /**
  * LiquidityLadder v3 — full-featured vertical price visualization
@@ -379,7 +380,7 @@ export default function LiquidityLadder() {
   const handleWheel = (e) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.15 : 0.15;
-    setZoom(prev => Math.max(0.5, Math.min(5, prev + delta)));
+    setZoom(prev => Math.max(0.3, Math.min(15, prev + delta)));
   };
 
   // Pan (drag) — only when not drag-editing a level
@@ -585,9 +586,9 @@ export default function LiquidityLadder() {
         style={{ background: heatmapGradient }} />
       {/* Zoom controls */}
       <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1">
-        <button onClick={() => setZoom(prev => Math.min(5, prev + 0.3))}
+        <button onClick={() => setZoom(prev => Math.min(15, prev + 0.3))}
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">+</button>
-        <button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.3))}
+        <button onClick={() => setZoom(prev => Math.max(0.3, prev - 0.3))}
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">−</button>
         <button onClick={resetView}
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
@@ -750,6 +751,9 @@ export default function LiquidityLadder() {
 
       {/* Ladder rail */}
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
+
+      {/* Daily Range Meter (left side) */}
+      <DailyRangeMeter />
 
       {/* #11: Mini-Map */}
       <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />
