@@ -16,6 +16,10 @@ import LiveAlerts from '@/components/trading/LiveAlerts';
 import LiveIntelligence from '@/components/trading/LiveIntelligence';
 import DisplacementPanel from '@/components/trading/DisplacementPanel';
 import SessionLevelsToggle from '@/components/trading/SessionLevelsToggle';
+import GhostTraderPanel from '@/components/trading/GhostTraderPanel';
+import GamePlanPanel from '@/components/trading/GamePlanPanel';
+import WeeklyHeatmap from '@/components/trading/WeeklyHeatmap';
+import AlertZonesPanel from '@/components/trading/AlertZonesPanel';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -199,6 +203,26 @@ export default function ResearchCockpit() {
                 {/* AVWAP Plans */}
                 <div className="p-3 border-b border-terminal-border">
                   <AVWAPPlanner />
+                </div>
+
+                {/* Game Plan */}
+                <div className="p-3 border-b border-terminal-border">
+                  <GamePlanPanel />
+                </div>
+
+                {/* Ghost Trader */}
+                <div className="p-3 border-b border-terminal-border">
+                  <GhostTraderPanel />
+                </div>
+
+                {/* Alert Zones */}
+                <div className="p-3 border-b border-terminal-border">
+                  <AlertZonesPanel />
+                </div>
+
+                {/* Weekly Performance */}
+                <div className="p-3 border-b border-terminal-border">
+                  <WeeklyHeatmap />
                 </div>
 
                 {/* Session Notes */}

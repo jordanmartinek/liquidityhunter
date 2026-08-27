@@ -3,6 +3,7 @@ import db, { ENTITIES } from './db';
 import { INSTRUMENTS, TIMEFRAMES } from './constants';
 import { displacementDetector, DISPLACEMENT_STATES } from './displacementDetector';
 import { sessionLevelEngine, SessionLevelEngine } from './sessionLevels';
+import { fibZoneTracker } from './bangerFeatures';
 
 const ResearchContext = createContext(null);
 
@@ -209,6 +210,11 @@ export function ResearchProvider({ children }) {
           const updated = [alert, ...prev].slice(0, 20); // Keep last 20
           return updated;
         });
+
+        // Auto-create fib zone on displacement
+        if (event === 'displacement' && data) {
+          fibZoneTracker.addFromDisplacement(data);
+        }
       }
     });
 

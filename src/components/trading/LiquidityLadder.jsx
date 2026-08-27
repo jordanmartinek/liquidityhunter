@@ -18,6 +18,7 @@ import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity } from '@/lib/ladderExtras';
 import { ladderAudio } from '@/lib/ladderAudio';
+import { alertZoneManager, fibZoneTracker } from '@/lib/bangerFeatures';
 
 /**
  * LiquidityLadder v3 — full-featured vertical price visualization
@@ -650,6 +651,41 @@ export default function LiquidityLadder() {
             <div className="w-full h-full bg-amber-500/8 border border-amber-500/20 rounded-sm" />
             <span className="absolute -right-1 top-0 text-[6px] text-amber-400/60 font-mono">
               🧲{zone.levelCount}
+            </span>
+          </div>
+        );
+      })}
+
+      {/* Alert Zones — custom user-defined price alert bands */}
+      {alertZoneManager.getActiveZones().map(zone => {
+        const topPct = priceToPercent(zone.highPrice);
+        const botPct = priceToPercent(zone.lowPrice);
+        const priceInZone = lastPrice >= zone.lowPrice && lastPrice <= zone.highPrice;
+        return (
+          <div key={zone.id} className={cn('absolute left-6 right-6 pointer-events-none z-[4] rounded',
+            priceInZone && 'animate-pulse'
+          )}
+            style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.max(Math.abs(botPct - topPct), 1.5)}%` }}>
+            <div className={cn('w-full h-full rounded-sm border border-dashed',
+              priceInZone ? 'bg-amber-500/15 border-amber-400/50' : 'bg-amber-500/5 border-amber-500/20'
+            )} />
+            <span className="absolute left-1 top-0 text-[6px] text-amber-300/70 font-mono truncate max-w-[60px]">
+              🔔 {zone.label}
+            </span>
+          </div>
+        );
+      })}
+
+      {/* Fib Auto-Zones — 0.705-0.886 retracement bands from displacements */}
+      {fibZoneTracker.getActiveZones().map(zone => {
+        const topPct = priceToPercent(zone.highPrice);
+        const botPct = priceToPercent(zone.lowPrice);
+        return (
+          <div key={zone.id} className="absolute left-12 right-12 pointer-events-none z-[3] rounded"
+            style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.max(Math.abs(botPct - topPct), 1.5)}%` }}>
+            <div className="w-full h-full bg-fuchsia-500/8 border border-fuchsia-500/25 rounded-sm" />
+            <span className="absolute right-1 top-0 text-[6px] text-fuchsia-300/70 font-mono">
+              Fib .705–.886
             </span>
           </div>
         );
