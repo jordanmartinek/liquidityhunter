@@ -753,7 +753,7 @@ export default function LiquidityLadder() {
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
 
       {/* Daily Range Meter (left side) */}
-      <DailyRangeMeter />
+      <DailyRangeMeter priceToPercent={priceToPercent} />
 
       {/* #11: Mini-Map */}
       <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />
