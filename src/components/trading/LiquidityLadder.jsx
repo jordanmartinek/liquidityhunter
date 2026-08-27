@@ -19,6 +19,7 @@ import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity } from '@/lib/ladderExtras';
 import { ladderAudio } from '@/lib/ladderAudio';
 import { alertZoneManager, fibZoneTracker } from '@/lib/bangerFeatures';
+import { hasPatternManager } from '@/lib/headAndShoulders';
 
 /**
  * LiquidityLadder v3 — full-featured vertical price visualization
@@ -366,6 +367,12 @@ export default function LiquidityLadder() {
     if (stalls.length > 0) {
       stalls.forEach(s => ladderAudio.stall(s.levelId));
     }
+
+    // H&S pattern detection (every 15 ticks — not too frequent)
+    if (priceLineRef.current.length % 15 === 0 && priceLineRef.current.length >= 80) {
+      const activeLevels = filteredLevels.filter(l => l.sweep_status !== 'Swept');
+      hasPatternManager.update(priceLineRef.current, activeLevels);
+    }
   }, [lastPrice]);
 
   // Zoom (scroll wheel)
@@ -687,6 +694,35 @@ export default function LiquidityLadder() {
             <span className="absolute right-1 top-0 text-[6px] text-fuchsia-300/70 font-mono">
               Fib .705–.886
             </span>
+          </div>
+        );
+      })}
+
+      {/* Head & Shoulders Pattern Indicators (max 2 per level) */}
+      {hasPatternManager.getPatterns().map(pattern => {
+        const headPct = priceToPercent(pattern.head);
+        const isBearish = pattern.type === 'h_and_s_top';
+        return (
+          <div key={pattern.id} className="absolute left-16 right-16 pointer-events-none z-[5]"
+            style={{ top: `${headPct}%`, transform: 'translateY(-50%)' }}>
+            <div className={cn('flex items-center justify-center gap-1 py-0.5 px-2 rounded-full border mx-auto w-fit',
+              isBearish
+                ? 'bg-red-500/10 border-red-500/30'
+                : 'bg-emerald-500/10 border-emerald-500/30'
+            )}>
+              <span className="text-[8px]">{isBearish ? '🐻' : '🐂'}</span>
+              <span className={cn('text-[7px] font-bold uppercase tracking-wider',
+                isBearish ? 'text-red-400' : 'text-emerald-400'
+              )}>
+                {isBearish ? 'H&S' : 'Inv H&S'}
+              </span>
+              <span className={cn('text-[7px] font-mono',
+                isBearish ? 'text-red-400/70' : 'text-emerald-400/70'
+              )}>
+                {pattern.displacementAt === 'right_shoulder' ? '⚡R' : '⚡L'}
+              </span>
+              <span className="text-[6px] text-slate-500">{pattern.confidence}%</span>
+            </div>
           </div>
         );
       })}
