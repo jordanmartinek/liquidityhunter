@@ -374,9 +374,27 @@ export default function LiquidityLadder() {
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
   const [killZoneOpacity, setKillZoneOpacity] = useState(1);
 
+  // ── Live refs for the per-tick effect ──────────────────────────────
+  // The price effect below runs on every lastPrice change but must read the
+  // freshest levels / draw direction / stalls WITHOUT re-subscribing on every
+  // level edit. We mirror those values into refs so the tick handler always
+  // sees current data (fixes stale-closure bugs where [lastPrice]-only deps
+  // captured old filteredLevels / drawDirection / stalls).
+  const filteredLevelsRef = useRef(filteredLevels);
+  const drawDirectionRef = useRef(drawDirection);
+  const stallsRef = useRef(stalls);
+
+  // Keep the live refs current so the per-tick effect never reads stale values.
+  useEffect(() => { filteredLevelsRef.current = filteredLevels; }, [filteredLevels]);
+  useEffect(() => { drawDirectionRef.current = drawDirection; }, [drawDirection]);
+  useEffect(() => { stallsRef.current = stalls; }, [stalls]);
+
   // Track price trail (last 20 positions) + analytics
   useEffect(() => {
     if (lastPrice <= 0) return;
+    // Read freshest values via refs (see filteredLevelsRef declaration above)
+    const curLevels = filteredLevelsRef.current;
+    const curDrawDirection = drawDirectionRef.current;
     priceTrailRef.current.push(lastPrice);
     if (priceTrailRef.current.length > 20) priceTrailRef.current = priceTrailRef.current.slice(-20);
     setPriceTrail([...priceTrailRef.current]);
@@ -392,18 +410,18 @@ export default function LiquidityLadder() {
     setVelocity(calculateVelocity(priceLineRef.current));
 
     // #10: Stall detection
-    const detectedStalls = detectStalls(priceLineRef.current, filteredLevels, lastPrice);
+    const detectedStalls = detectStalls(priceLineRef.current, curLevels, lastPrice);
     setStalls(detectedStalls);
 
     // #5: Time-at-Level accumulation
-    timeAtLevelRef.current = updateTimeAtLevel(timeAtLevelRef.current, filteredLevels, lastPrice);
+    timeAtLevelRef.current = updateTimeAtLevel(timeAtLevelRef.current, curLevels, lastPrice);
     if (priceLineRef.current.length % 5 === 0) {
       setTimeAtLevel({ ...timeAtLevelRef.current });
     }
 
     // Heatmap update (every 10 ticks)
     if (priceLineRef.current.length % 10 === 0) {
-      const heatmap = computeLiquidityHeatmap(filteredLevels, lastPrice, drawDirection);
+      const heatmap = computeLiquidityHeatmap(curLevels, lastPrice, curDrawDirection);
       setHeatmapGradient(heatmapToGradient(heatmap));
     }
 
@@ -413,19 +431,19 @@ export default function LiquidityLadder() {
       setKillZoneOpacity(getKillZoneOpacity(kz));
     }
 
-    // Audio: stall detection sounds
-    if (stalls.length > 0) {
-      stalls.forEach(s => ladderAudio.stall(s.levelId));
+    // Audio: stall detection sounds (use the stalls we just computed this tick)
+    if (detectedStalls.length > 0) {
+      detectedStalls.forEach(s => ladderAudio.stall(s.levelId));
     }
 
     // H&S pattern detection (every 15 ticks — not too frequent)
     if (priceLineRef.current.length % 15 === 0 && priceLineRef.current.length >= 80) {
-      const activeLevels = filteredLevels.filter(l => l.sweep_status !== 'Swept');
+      const activeLevels = curLevels.filter(l => l.sweep_status !== 'Swept');
       hasPatternManager.update(priceLineRef.current, activeLevels);
     }
 
     // SFP detection (every tick — lightweight check)
-    const activeLevelsForSFP = filteredLevels.filter(l => l.sweep_status !== 'Swept');
+    const activeLevelsForSFP = curLevels.filter(l => l.sweep_status !== 'Swept');
     sfpDetector.check(priceLineRef.current, activeLevelsForSFP, lastPrice);
     if (priceLineRef.current.length % 5 === 0) {
       setSfpDetections([...sfpDetector.getDetections()]);
@@ -445,12 +463,12 @@ export default function LiquidityLadder() {
 
     // Gravity weights (every 5 ticks)
     if (priceLineRef.current.length % 5 === 0) {
-      setGravityWeights(computeGravityWeights(filteredLevels, lastPrice));
+      setGravityWeights(computeGravityWeights(curLevels, lastPrice));
     }
 
     // Liquidity voids (every 30 ticks — stable)
     if (priceLineRef.current.length % 30 === 0) {
-      setLiquidityVoids(detectLiquidityVoids(filteredLevels));
+      setLiquidityVoids(detectLiquidityVoids(curLevels));
     }
 
     // Webhook: send on SFP detection
