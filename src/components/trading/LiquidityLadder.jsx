@@ -361,6 +361,9 @@ export default function LiquidityLadder() {
   const [whatIfActive, setWhatIfActive] = useState(false);
   const [whatIfPrice, setWhatIfPrice] = useState(null);
 
+  // Cursor crosshair: shows the price at the mouse Y position so levels can be marked precisely
+  const [cursor, setCursor] = useState(null); // { pct, price }
+
   // Depth-of-field blur toggle (off by default so labels stay sharp for analysis)
   const [blurEnabled, setBlurEnabled] = useState(false);
 
@@ -470,6 +473,9 @@ export default function LiquidityLadder() {
     dragStartRef.current = { y: e.clientY, panAtStart: panOffset };
   };
   const handleMouseMove = (e) => {
+    // Update the cursor crosshair (price readout) on every move
+    updateCursor(e.clientY);
+
     // #12: Drag-to-edit handling
     if (dragEditLevel) {
       setDragEditY(e.clientY);
@@ -567,14 +573,15 @@ export default function LiquidityLadder() {
     dragStartRef.current = { y: touch.clientY, panAtStart: panOffset };
   };
   const handleTouchMove = (e) => {
-    if (!isDragging) return;
     const touch = e.touches[0];
+    updateCursor(touch.clientY);
+    if (!isDragging) return;
     const dy = touch.clientY - dragStartRef.current.y;
     const containerHeight = containerRef.current?.offsetHeight || 500;
     const panDelta = (dy / containerHeight) * 100 / zoom;
     setPanOffset(dragStartRef.current.panAtStart + panDelta);
   };
-  const handleTouchEnd = () => setIsDragging(false);
+  const handleTouchEnd = () => { setIsDragging(false); setCursor(null); };
 
   // Reset view — recenter the ladder but keep the current zoom level
   const resetView = () => { setPanOffset(0); };
@@ -683,6 +690,29 @@ export default function LiquidityLadder() {
     return (pct - center) * zoom + 50;
   }, [paddedMax, totalRange, zoom, panOffset]);
 
+  // Percent-to-price helper (inverse of priceToPercent) — used by the cursor crosshair
+  const percentToPrice = useCallback((viewPct) => {
+    if (totalRange === 0) return 0;
+    const center = 50 + panOffset;
+    const rawPct = (viewPct - 50) / zoom + center;
+    return paddedMax - (rawPct / 100) * totalRange;
+  }, [paddedMax, totalRange, zoom, panOffset]);
+
+  // Update the cursor crosshair from a clientY coordinate
+  const updateCursor = useCallback((clientY) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.height === 0) return;
+    const pct = ((clientY - rect.top) / rect.height) * 100;
+    if (pct < 0 || pct > 100) { setCursor(null); return; }
+    const price = percentToPrice(pct);
+    setCursor({ pct, price });
+  }, [percentToPrice]);
+
+  const handleMouseLeave = (e) => {
+    setCursor(null);
+    handleMouseUp(e);
+  };
+
   // Stall level IDs for quick lookup
   const stallingLevelIds = useMemo(() => new Set(stalls.map(s => s.levelId)), [stalls]);
 
@@ -712,7 +742,7 @@ export default function LiquidityLadder() {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -1107,6 +1137,17 @@ export default function LiquidityLadder() {
           <PriceMarker percent={priceMarkerPercent} price={lastPrice} />
         )}
       </div>
+
+      {/* Cursor crosshair — horizontal guide line + price readout that follows the mouse */}
+      {cursor && cursor.price > 0 && !isDragging && !dragEditLevel && (
+        <div className="absolute left-0 right-0 flex items-center z-[90] pointer-events-none"
+          style={{ top: `${cursor.pct}%`, transform: 'translateY(-50%)' }}>
+          <div className="flex-1 h-px bg-teal-400/40 border-t border-dashed border-teal-400/50" />
+          <span className="text-[10px] text-teal-200 font-mono font-bold whitespace-nowrap bg-teal-900/90 px-1.5 py-0.5 rounded border border-teal-500/50 shadow-sm">
+            {cursor.price.toFixed(2)}
+          </span>
+        </div>
+      )}
 
       {/* #8: Liquidity Void Shading */}
       {liquidityVoids.map(v => {
