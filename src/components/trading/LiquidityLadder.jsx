@@ -579,6 +579,30 @@ export default function LiquidityLadder() {
   // Reset view
   const resetView = () => { setZoom(1); setPanOffset(0); };
 
+  // Recenter on current price — snaps the ladder back so the live price sits
+  // in the vertical center, WITHOUT changing the current zoom level.
+  const recenterOnPrice = useCallback(() => {
+    if (lastPrice <= 0 || filteredLevels.length === 0) {
+      // No price to anchor to — just reset pan
+      setPanOffset(0);
+      return;
+    }
+    const allPrices = filteredLevels.map(l => l.price);
+    allPrices.push(lastPrice);
+    const maxP = Math.max(...allPrices);
+    const minP = Math.min(...allPrices);
+    const rawRange = maxP - minP;
+    const padding = Math.max(rawRange * 0.12, 5);
+    const pMax = maxP + padding;
+    const pMin = minP - padding;
+    const tRange = pMax - pMin;
+    // Raw (untransformed) percent position of the price
+    const rawPct = ((pMax - lastPrice) / tRange) * 100;
+    // Transformed position is (rawPct - (50 + panOffset)) * zoom + 50.
+    // Setting panOffset = rawPct - 50 makes the transformed position land at 50 (center).
+    setPanOffset(rawPct - 50);
+  }, [lastPrice, filteredLevels]);
+
   // Detect confluence (levels within 15 pts of each other)
   const confluenceLevels = useMemo(() => {
     const active = filteredLevels.filter(l => l.sweep_status !== 'Swept');
@@ -709,7 +733,14 @@ export default function LiquidityLadder() {
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">+</button>
         <button onClick={() => setZoom(prev => Math.max(0.3, prev - 0.3))}
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">−</button>
+        <button onClick={recenterOnPrice}
+          title="Snap the ladder back so the current price is centered (keeps your zoom level)"
+          disabled={lastPrice <= 0}
+          className={cn('h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] flex items-center justify-center',
+            lastPrice <= 0 ? 'text-slate-700 cursor-not-allowed' : 'text-slate-500 hover:text-teal-400'
+          )}>🎯 Price</button>
         <button onClick={resetView}
+          title="Reset zoom to 1x and center the view"
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
         <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
         <button
