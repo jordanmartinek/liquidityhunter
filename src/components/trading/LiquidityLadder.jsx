@@ -54,11 +54,12 @@ import {
 
 // ─── Price Marker ───────────────────────────────────────────
 function PriceMarker({ percent, price }) {
+  // Thin horizontal reference line across the axis + small price label.
+  // The prominent price representation is the time-series price line itself.
   return (
     <div className="absolute left-0 right-0 flex items-center z-20" style={{ top: `${percent}%`, transform: 'translateY(-50%)' }}>
-      <div className="w-3 h-3 bg-white rotate-45 transform -translate-x-0.5 border border-slate-400 shadow-sm shadow-white/30" />
-      <div className="flex-1 h-[2px] bg-white/50" />
-      <span className="text-[10px] text-white font-mono font-bold ml-1 whitespace-nowrap bg-slate-800/90 px-1.5 py-0.5 rounded border border-slate-600">
+      <div className="flex-1 h-px bg-white/25 border-t border-dashed border-white/20" />
+      <span className="text-[9px] text-slate-300 font-mono ml-1 whitespace-nowrap bg-slate-800/70 px-1 py-0.5 rounded border border-slate-700/60">
         {price > 0 ? price.toFixed(2) : '—'}
       </span>
     </div>
@@ -334,6 +335,8 @@ export default function LiquidityLadder() {
   // Zoom & Pan state
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState(0);
+  // Horizontal pan: shifts the price line left (0 = flush right, higher = more empty space on the right)
+  const [xPan, setXPan] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ y: 0, panAtStart: 0 });
 
@@ -584,7 +587,7 @@ export default function LiquidityLadder() {
   const handleTouchEnd = () => { setIsDragging(false); setCursor(null); };
 
   // Reset view — recenter the ladder but keep the current zoom level
-  const resetView = () => { setPanOffset(0); };
+  const resetView = () => { setPanOffset(0); setXPan(0); };
 
   // Recenter on current price — snaps the ladder back so the live price sits
   // in the vertical center, WITHOUT changing the current zoom level.
@@ -763,6 +766,15 @@ export default function LiquidityLadder() {
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">+</button>
         <button onClick={() => setZoom(prev => Math.max(0.3, prev - 0.3))}
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">−</button>
+        <button onClick={() => setXPan(prev => Math.min(60, prev + 10))}
+          title="Shift the price line left to reveal empty space on the right"
+          className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">◀</button>
+        <button onClick={() => setXPan(prev => Math.max(0, prev - 10))}
+          disabled={xPan <= 0}
+          title="Bring the price line back toward the right edge"
+          className={cn('w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] flex items-center justify-center',
+            xPan <= 0 ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-white'
+          )}>▶</button>
         <button onClick={recenterOnPrice}
           title="Snap the ladder back so the current price is centered (keeps your zoom level)"
           disabled={lastPrice <= 0}
@@ -1003,8 +1015,11 @@ export default function LiquidityLadder() {
                 return (pct - center) * zoom + 50;
               };
 
+              // Horizontal pan: compress the plot into [0, plotWidth] so xPan% is
+              // left empty on the right, making the price end point easy to read.
+              const plotWidth = Math.max(20, 100 - xPan);
               const points = priceLine.map(p => ({
-                x: ((p.time - timeMin) / timeRange) * 100,
+                x: ((p.time - timeMin) / timeRange) * plotWidth,
                 y: priceToY(p.price),
               }));
 
@@ -1012,22 +1027,49 @@ export default function LiquidityLadder() {
               const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
               const firstPrice = priceLine[0].price;
               const priceUp = priceLine[priceLine.length - 1].price >= firstPrice;
-              const lineColor = priceUp ? 'rgba(16,185,129,0.6)' : 'rgba(239,68,68,0.6)';
-              const glowColor = priceUp ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+              // Prominent, permanent price line
+              const lineColor = priceUp ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
+              const glowColor = priceUp ? 'rgba(16,185,129,0.28)' : 'rgba(239,68,68,0.28)';
+              const end = points[points.length - 1];
 
               return (
                 <>
-                  <path d={pathD} fill="none" stroke={glowColor} strokeWidth="2.5" strokeLinejoin="round" />
-                  <path d={pathD} fill="none" stroke={lineColor} strokeWidth="0.8" strokeLinejoin="round" />
-                  {points.length > 0 && (
-                    <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y} r="1.5"
-                      fill={priceUp ? '#10b981' : '#ef4444'} />
-                  )}
+                  {/* Glow underlay */}
+                  <path d={pathD} fill="none" stroke={glowColor} strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />
+                  {/* Main line */}
+                  <path d={pathD} fill="none" stroke={lineColor} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+                  {/* End point emphasis */}
+                  <circle cx={end.x} cy={end.y} r="2.2" fill={priceUp ? '#10b981' : '#ef4444'}
+                    stroke="#0b0f14" strokeWidth="0.6" />
+                  <circle cx={end.x} cy={end.y} r="3.4" fill="none"
+                    stroke={priceUp ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)'} strokeWidth="0.5" />
                 </>
               );
             })()}
           </svg>
         )}
+
+        {/* Price line END-POINT label (HTML overlay — crisp text, moves with horizontal pan) */}
+        {priceLine.length > 5 && priceMarkerPercent !== null && lastPrice > 0 && (() => {
+          const priceUp = priceLine[priceLine.length - 1].price >= priceLine[0].price;
+          const plotWidth = Math.max(20, 100 - xPan);
+          return (
+            <div className={cn('absolute z-[8] pointer-events-none -translate-y-1/2',
+                // When flush-right (no x-pan) anchor the label to the left of the point so it stays on-screen
+                xPan <= 0 ? '-translate-x-full' : ''
+              )}
+              style={{ left: `${plotWidth}%`, top: `${priceMarkerPercent}%` }}>
+              <span className={cn('text-[10px] font-mono font-bold whitespace-nowrap px-1.5 py-0.5 rounded border',
+                xPan <= 0 ? 'mr-1' : 'ml-1',
+                priceUp
+                  ? 'text-emerald-200 bg-emerald-900/80 border-emerald-500/50'
+                  : 'text-red-200 bg-red-900/80 border-red-500/50'
+              )}>
+                {lastPrice.toFixed(2)}
+              </span>
+            </div>
+          );
+        })()}
 
         {positions.map(({ level, percent }) => {
           const distanceFromPrice = lastPrice > 0 ? level.price - lastPrice : 0;
