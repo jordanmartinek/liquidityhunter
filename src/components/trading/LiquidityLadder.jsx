@@ -576,8 +576,8 @@ export default function LiquidityLadder() {
   };
   const handleTouchEnd = () => setIsDragging(false);
 
-  // Reset view
-  const resetView = () => { setZoom(1); setPanOffset(0); };
+  // Reset view — recenter the ladder but keep the current zoom level
+  const resetView = () => { setPanOffset(0); };
 
   // Recenter on current price — snaps the ladder back so the live price sits
   // in the vertical center, WITHOUT changing the current zoom level.
@@ -740,7 +740,7 @@ export default function LiquidityLadder() {
             lastPrice <= 0 ? 'text-slate-700 cursor-not-allowed' : 'text-slate-500 hover:text-teal-400'
           )}>🎯 Price</button>
         <button onClick={resetView}
-          title="Reset zoom to 1x and center the view"
+          title="Recenter the view (keeps your current zoom level)"
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
         <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
         <button
