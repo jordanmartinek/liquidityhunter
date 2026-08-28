@@ -81,6 +81,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
+  blurEnabled,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -118,7 +119,7 @@ function Rung({
         top: `${percent}%`,
         transform: 'translateY(-50%)',
         opacity: finalOpacity,
-        filter: blurFactor > 0.3 ? `blur(${blurFactor.toFixed(1)}px)` : 'none',
+        filter: blurEnabled && blurFactor > 0.3 ? `blur(${blurFactor.toFixed(1)}px)` : 'none',
       }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, level); }}
     >
@@ -359,6 +360,9 @@ export default function LiquidityLadder() {
   const [contextMenu, setContextMenu] = useState(null); // { x, y, level }
   const [whatIfActive, setWhatIfActive] = useState(false);
   const [whatIfPrice, setWhatIfPrice] = useState(null);
+
+  // Depth-of-field blur toggle (off by default so labels stay sharp for analysis)
+  const [blurEnabled, setBlurEnabled] = useState(false);
 
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
@@ -708,6 +712,18 @@ export default function LiquidityLadder() {
         <button onClick={resetView}
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
         <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
+        <button
+          onClick={() => setBlurEnabled(prev => !prev)}
+          title={blurEnabled ? 'Depth-of-field blur ON — click to turn off' : 'Depth-of-field blur OFF — click to turn on'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            blurEnabled
+              ? 'bg-teal-500/20 border-teal-500/50 text-teal-400'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          {blurEnabled ? '🔵 blur' : '⚪ blur'}
+        </button>
       </div>
 
       {/* #9: Velocity Chevrons on center rail */}
@@ -1008,6 +1024,7 @@ export default function LiquidityLadder() {
               dynamicWidth={dynamicWidth}
               hasSFP={hasSFP}
               onContextMenu={handleRungContextMenu}
+              blurEnabled={blurEnabled}
             />
           );
         })}
