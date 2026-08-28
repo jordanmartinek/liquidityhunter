@@ -338,7 +338,7 @@ export default function LiquidityLadder() {
   // Horizontal pan: shifts the price line left (0 = flush right, higher = more empty space on the right)
   const [xPan, setXPan] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef({ y: 0, panAtStart: 0 });
+  const dragStartRef = useRef({ y: 0, x: 0, panAtStart: 0, xPanAtStart: 0 });
 
   // #5: Time-at-Level tracking
   const timeAtLevelRef = useRef({});
@@ -469,11 +469,12 @@ export default function LiquidityLadder() {
     setZoom(prev => Math.max(0.3, Math.min(15, prev + delta)));
   };
 
-  // Pan (drag) — only when not drag-editing a level
+  // Pan (drag) — only when not drag-editing a level.
+  // Vertical drag pans price (panOffset); horizontal drag pans the price line (xPan).
   const handleMouseDown = (e) => {
     if (dragEditLevel) return;
     setIsDragging(true);
-    dragStartRef.current = { y: e.clientY, panAtStart: panOffset };
+    dragStartRef.current = { y: e.clientY, x: e.clientX, panAtStart: panOffset, xPanAtStart: xPan };
   };
   const handleMouseMove = (e) => {
     // Update the cursor crosshair (price readout) on every move
@@ -485,10 +486,18 @@ export default function LiquidityLadder() {
       return;
     }
     if (!isDragging) return;
-    const dy = e.clientY - dragStartRef.current.y;
     const containerHeight = containerRef.current?.offsetHeight || 500;
+    const containerWidth = containerRef.current?.offsetWidth || 500;
+
+    // Vertical → price pan
+    const dy = e.clientY - dragStartRef.current.y;
     const panDelta = (dy / containerHeight) * 100 / zoom;
     setPanOffset(dragStartRef.current.panAtStart + panDelta);
+
+    // Horizontal → xPan (drag left reveals empty space on the right)
+    const dx = e.clientX - dragStartRef.current.x;
+    const xPanDelta = -(dx / containerWidth) * 100;
+    setXPan(Math.max(0, Math.min(60, dragStartRef.current.xPanAtStart + xPanDelta)));
   };
   const handleMouseUp = (e) => {
     // #12: Complete drag-to-edit
@@ -569,20 +578,28 @@ export default function LiquidityLadder() {
   // Close context menu
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  // Touch support
+  // Touch support — same two-axis panning as mouse
   const handleTouchStart = (e) => {
     const touch = e.touches[0];
     setIsDragging(true);
-    dragStartRef.current = { y: touch.clientY, panAtStart: panOffset };
+    dragStartRef.current = { y: touch.clientY, x: touch.clientX, panAtStart: panOffset, xPanAtStart: xPan };
   };
   const handleTouchMove = (e) => {
     const touch = e.touches[0];
     updateCursor(touch.clientY);
     if (!isDragging) return;
-    const dy = touch.clientY - dragStartRef.current.y;
     const containerHeight = containerRef.current?.offsetHeight || 500;
+    const containerWidth = containerRef.current?.offsetWidth || 500;
+
+    // Vertical → price pan
+    const dy = touch.clientY - dragStartRef.current.y;
     const panDelta = (dy / containerHeight) * 100 / zoom;
     setPanOffset(dragStartRef.current.panAtStart + panDelta);
+
+    // Horizontal → xPan (drag left reveals empty space on the right)
+    const dx = touch.clientX - dragStartRef.current.x;
+    const xPanDelta = -(dx / containerWidth) * 100;
+    setXPan(Math.max(0, Math.min(60, dragStartRef.current.xPanAtStart + xPanDelta)));
   };
   const handleTouchEnd = () => { setIsDragging(false); setCursor(null); };
 
