@@ -1052,14 +1052,14 @@ export default function LiquidityLadder() {
               return (
                 <>
                   {/* Glow underlay */}
-                  <path d={pathD} fill="none" stroke={glowColor} strokeWidth="3.5" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d={pathD} fill="none" stroke={glowColor} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
                   {/* Main line */}
-                  <path d={pathD} fill="none" stroke={lineColor} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+                  <path d={pathD} fill="none" stroke={lineColor} strokeWidth="0.7" strokeLinejoin="round" strokeLinecap="round" />
                   {/* End point emphasis */}
-                  <circle cx={end.x} cy={end.y} r="2.2" fill={priceUp ? '#10b981' : '#ef4444'}
-                    stroke="#0b0f14" strokeWidth="0.6" />
-                  <circle cx={end.x} cy={end.y} r="3.4" fill="none"
-                    stroke={priceUp ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)'} strokeWidth="0.5" />
+                  <circle cx={end.x} cy={end.y} r="1.4" fill={priceUp ? '#10b981' : '#ef4444'}
+                    stroke="#0b0f14" strokeWidth="0.4" />
+                  <circle cx={end.x} cy={end.y} r="2.2" fill="none"
+                    stroke={priceUp ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)'} strokeWidth="0.4" />
                 </>
               );
             })()}
