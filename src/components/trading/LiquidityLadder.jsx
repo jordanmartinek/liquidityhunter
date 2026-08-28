@@ -21,6 +21,19 @@ import { ladderAudio } from '@/lib/ladderAudio';
 import { alertZoneManager, fibZoneTracker } from '@/lib/bangerFeatures';
 import { hasPatternManager } from '@/lib/headAndShoulders';
 import DailyRangeMeter from './DailyRangeMeter';
+import {
+  sfpDetector,
+  detectLiquidityVoids,
+  openingRangeTracker,
+  generateSmartSuggestions,
+  whatIfMode,
+  computeGlowIntensity,
+  computeGravityWeights,
+  computeBlurFactor,
+  computeDynamicWidth,
+  trailHistory,
+  webhookAlerts,
+} from '@/lib/ladderEnhancements';
 
 /**
  * LiquidityLadder v3 — full-featured vertical price visualization
@@ -67,7 +80,7 @@ function MiniSnapshot({ snapshot }) {
 function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
-  isStalling, onDragStart, isDragTarget,
+  isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -76,9 +89,8 @@ function Rung({
   const isAutoSession = level.auto_session === true;
   const sessionTag = level.session_type;
 
-  // MTF depth affects width
-  const baseWidth = 35 + level.strength * 10;
-  const rungWidth = Math.min(90, baseWidth * mtfDepth.heightMult);
+  // Use dynamic width instead of static
+  const rungWidth = dynamicWidth || Math.min(90, (35 + level.strength * 10) * mtfDepth.heightMult);
   const rungHeight = Math.max(18, Math.round(20 * mtfDepth.heightMult));
 
   // Displacement glow states
@@ -90,6 +102,11 @@ function Rung({
   const baseOpacity = isSwept ? 0.2 : isTested ? 0.65 : 1;
   const finalOpacity = baseOpacity * ageOpacity;
 
+  // Glow box-shadow based on intensity
+  const glowShadow = glowIntensity > 0.3 && !isSwept
+    ? `0 0 ${Math.round(glowIntensity * 12)}px ${Math.round(glowIntensity * 4)}px ${isBSL ? 'rgba(6,182,212,' : 'rgba(249,115,22,'}${(glowIntensity * 0.4).toFixed(2)})`
+    : 'none';
+
   return (
     <div
       className={cn('absolute left-0 right-0 flex items-center group transition-all',
@@ -97,7 +114,13 @@ function Rung({
         isStalling && !isSwept && 'ring-2 ring-yellow-400/50 rounded',
         isDragTarget && 'ring-2 ring-teal-400/60 rounded',
       )}
-      style={{ top: `${percent}%`, transform: 'translateY(-50%)', opacity: finalOpacity }}
+      style={{
+        top: `${percent}%`,
+        transform: 'translateY(-50%)',
+        opacity: finalOpacity,
+        filter: blurFactor > 0.3 ? `blur(${blurFactor.toFixed(1)}px)` : 'none',
+      }}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, level); }}
     >
       {/* Distance + Sweep Prob (left) */}
       <div className="w-14 shrink-0 text-right pr-1">
@@ -165,9 +188,14 @@ function Rung({
             borderWidth: mtfDepth.weight >= 5 ? '2px' : '1.5px',
             borderStyle: isSwept ? 'dashed' : isTested ? 'dashed' : isAutoSession ? 'dotted' : 'solid',
             borderColor: isSwept ? '#3f3f46' : isAutoSession ? '#8b5cf6' : strength.color,
+            boxShadow: glowShadow,
           }}
           onMouseDown={(e) => { e.stopPropagation(); onDragStart?.(e, level); }}
         >
+          {/* SFP badge */}
+          {hasSFP && !isSwept && (
+            <span className="text-[7px] mr-0.5 animate-pulse" title="Swing Failure Pattern detected">🔄</span>
+          )}
           {/* Auto-session badge */}
           {isAutoSession && !isSwept && (
             <span className={cn('text-[7px] font-bold mr-1 px-1 py-px rounded-sm',
@@ -293,6 +321,7 @@ export default function LiquidityLadder() {
   const {
     getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive,
     displacements, watchingLevels, updateLevel, sessionLevelsState,
+    addLevel, removeLevel,
   } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
@@ -320,6 +349,16 @@ export default function LiquidityLadder() {
   // #12: Drag-to-edit state
   const [dragEditLevel, setDragEditLevel] = useState(null);
   const [dragEditY, setDragEditY] = useState(null);
+
+  // New enhancement states
+  const [sfpDetections, setSfpDetections] = useState([]);
+  const [liquidityVoids, setLiquidityVoids] = useState([]);
+  const [openingRange, setOpeningRange] = useState(null);
+  const [gravityWeights, setGravityWeights] = useState([]);
+  const [trailPoints, setTrailPoints] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, level }
+  const [whatIfActive, setWhatIfActive] = useState(false);
+  const [whatIfPrice, setWhatIfPrice] = useState(null);
 
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
@@ -373,6 +412,43 @@ export default function LiquidityLadder() {
     if (priceLineRef.current.length % 15 === 0 && priceLineRef.current.length >= 80) {
       const activeLevels = filteredLevels.filter(l => l.sweep_status !== 'Swept');
       hasPatternManager.update(priceLineRef.current, activeLevels);
+    }
+
+    // SFP detection (every tick — lightweight check)
+    const activeLevelsForSFP = filteredLevels.filter(l => l.sweep_status !== 'Swept');
+    sfpDetector.check(priceLineRef.current, activeLevelsForSFP, lastPrice);
+    if (priceLineRef.current.length % 5 === 0) {
+      setSfpDetections([...sfpDetector.getDetections()]);
+    }
+
+    // Opening Range tracking
+    openingRangeTracker.addTick(lastPrice);
+    if (priceLineRef.current.length % 10 === 0) {
+      setOpeningRange(openingRangeTracker.getRange());
+    }
+
+    // Trail history
+    trailHistory.addPoint(lastPrice);
+    if (priceLineRef.current.length % 10 === 0) {
+      setTrailPoints([...trailHistory.getPoints()]);
+    }
+
+    // Gravity weights (every 5 ticks)
+    if (priceLineRef.current.length % 5 === 0) {
+      setGravityWeights(computeGravityWeights(filteredLevels, lastPrice));
+    }
+
+    // Liquidity voids (every 30 ticks — stable)
+    if (priceLineRef.current.length % 30 === 0) {
+      setLiquidityVoids(detectLiquidityVoids(filteredLevels));
+    }
+
+    // Webhook: send on SFP detection
+    if (sfpDetector.getDetections().length > 0) {
+      const latest = sfpDetector.getDetections().slice(-1)[0];
+      if (latest && Date.now() - latest.time < 2000) {
+        webhookAlerts.send('🔄 SFP Detected', `${latest.direction} SFP at ${latest.levelName} (${latest.levelPrice})`);
+      }
     }
   }, [lastPrice]);
 
@@ -442,6 +518,43 @@ export default function LiquidityLadder() {
     setDragEditLevel(level);
     setDragEditY(e.clientY);
   }, []);
+
+  // #21: Quick-add level (double-click on ladder)
+  const handleDoubleClick = useCallback((e) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const relativeY = (e.clientY - rect.top) / rect.height;
+    // Convert Y to price using reverse transform
+    const allPrices = filteredLevels.map(l => l.price);
+    if (lastPrice > 0) allPrices.push(lastPrice);
+    if (allPrices.length === 0) return;
+    const maxP = Math.max(...allPrices);
+    const minP = Math.min(...allPrices);
+    const rawRange = maxP - minP;
+    const padding = Math.max(rawRange * 0.12, 5);
+    const pMax = maxP + padding;
+    const pMin = minP - padding;
+    const tRange = pMax - pMin;
+    const viewPct = relativeY * 100;
+    const center = 50 + panOffset;
+    const rawPct = (viewPct - 50) / zoom + center;
+    const price = pMax - (rawPct / 100) * tRange;
+    if (price > 0) {
+      const name = prompt(`Quick-add level at ${price.toFixed(2)}\nEnter name (or cancel):`);
+      if (name !== null) {
+        const side = price > lastPrice ? 'Buy-Side' : 'Sell-Side';
+        addLevel({ price: parseFloat(price.toFixed(2)), name: name || `Level ${price.toFixed(0)}`, side, pool_type: 'Custom', timeframe: '1H', strength: 3, sweep_status: 'Untouched' });
+      }
+    }
+  }, [filteredLevels, lastPrice, zoom, panOffset]);
+
+  // #22: Right-click context menu on rungs
+  const handleRungContextMenu = useCallback((e, level) => {
+    setContextMenu({ x: e.clientX, y: e.clientY, level });
+  }, []);
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   // Touch support
   const handleTouchStart = (e) => {
@@ -575,6 +688,8 @@ export default function LiquidityLadder() {
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onDoubleClick={handleDoubleClick}
+      onClick={closeContextMenu}
       style={{
         cursor: dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
         opacity: killZoneOpacity,
@@ -859,6 +974,19 @@ export default function LiquidityLadder() {
           // #10: Is this level stalling?
           const isStalling = stallingLevelIds.has(level.id);
 
+          // #13: Glow intensity
+          const killZone = getActiveKillZone();
+          const glowIntensity = computeGlowIntensity(level, lastPrice, drawDirection, sweepProb, killZone.active && killZone.intensity === 'high', timeAtLevel[level.id] || 0);
+
+          // #19: Depth-of-field blur
+          const blurFactor = computeBlurFactor(level.price, lastPrice);
+
+          // #20: Dynamic width
+          const dynamicWidth = computeDynamicWidth(level, sweepProb, timeAtLevel[level.id] || 0, glowIntensity);
+
+          // #6: SFP check
+          const hasSFP = sfpDetections.some(s => s.levelId === level.id);
+
           return (
             <Rung
               key={level.id}
@@ -875,6 +1003,11 @@ export default function LiquidityLadder() {
               isStalling={isStalling}
               onDragStart={handleRungDragStart}
               isDragTarget={dragEditLevel?.id === level.id}
+              glowIntensity={glowIntensity}
+              blurFactor={blurFactor}
+              dynamicWidth={dynamicWidth}
+              hasSFP={hasSFP}
+              onContextMenu={handleRungContextMenu}
             />
           );
         })}
@@ -926,6 +1059,126 @@ export default function LiquidityLadder() {
           <PriceMarker percent={priceMarkerPercent} price={lastPrice} />
         )}
       </div>
+
+      {/* #8: Liquidity Void Shading */}
+      {liquidityVoids.map(v => {
+        const topPct = priceToPercent(v.highPrice);
+        const botPct = priceToPercent(v.lowPrice);
+        return (
+          <div key={v.id} className="absolute left-6 right-6 pointer-events-none z-[1]"
+            style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.abs(botPct - topPct)}%` }}>
+            <div className="w-full h-full bg-slate-950/40 border border-dashed border-slate-700/30 rounded" />
+            <span className="absolute right-1 top-1 text-[6px] text-slate-600 font-mono">🕳️ void {v.gap}pts</span>
+          </div>
+        );
+      })}
+
+      {/* #10: Opening Range Lines */}
+      {openingRange && (
+        <>
+          <div className="absolute left-0 right-0 pointer-events-none z-[4] flex items-center"
+            style={{ top: `${priceToPercent(openingRange.high)}%`, transform: 'translateY(-50%)' }}>
+            <div className="flex-1 h-[1.5px] border-t border-dashed border-green-400/40" />
+            <span className="text-[6px] text-green-400/70 font-mono px-1 bg-terminal-bg/70 rounded">OR-H {openingRange.high.toFixed(0)}</span>
+          </div>
+          <div className="absolute left-0 right-0 pointer-events-none z-[4] flex items-center"
+            style={{ top: `${priceToPercent(openingRange.low)}%`, transform: 'translateY(-50%)' }}>
+            <div className="flex-1 h-[1.5px] border-t border-dashed border-red-400/40" />
+            <span className="text-[6px] text-red-400/70 font-mono px-1 bg-terminal-bg/70 rounded">OR-L {openingRange.low.toFixed(0)}</span>
+          </div>
+        </>
+      )}
+
+      {/* #14: Gravity Particles (subtle dots pulling toward high-prob levels) */}
+      {gravityWeights.slice(0, 3).map((gw, i) => {
+        const levelPct = priceToPercent(gw.price);
+        const pricePct = priceMarkerPercent || 50;
+        // Draw 2-3 particles between price and level
+        return Array.from({ length: Math.min(Math.ceil(gw.weight), 3) }).map((_, pi) => {
+          const t = (pi + 1) / (Math.ceil(gw.weight) + 1);
+          const y = pricePct + (levelPct - pricePct) * t;
+          return (
+            <div key={`grav_${i}_${pi}`}
+              className={cn('absolute left-1/2 -translate-x-1/2 rounded-full pointer-events-none z-[2]',
+                gw.above ? 'bg-cyan-400/20' : 'bg-orange-400/20'
+              )}
+              style={{
+                top: `${y}%`,
+                width: `${2 + gw.weight}px`,
+                height: `${2 + gw.weight}px`,
+                opacity: 0.3 + (gw.weight / 5) * 0.4,
+                animation: `pulse ${2 + pi * 0.5}s ease-in-out infinite`,
+              }}
+            />
+          );
+        });
+      })}
+
+      {/* #15: Trail History (ghosted path since session start) */}
+      {trailPoints.length > 10 && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-[2] opacity-20" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {(() => {
+            const allPrices = [...filteredLevels.map(l => l.price)];
+            if (lastPrice > 0) allPrices.push(lastPrice);
+            if (allPrices.length === 0) return null;
+            const maxP = Math.max(...allPrices);
+            const minP = Math.min(...allPrices);
+            const rawRange = maxP - minP;
+            const padding = Math.max(rawRange * 0.12, 5);
+            const pMax = maxP + padding;
+            const tRange = pMax - (minP - padding);
+
+            const step = Math.max(1, Math.floor(trailPoints.length / 200));
+            const sampled = trailPoints.filter((_, i) => i % step === 0);
+            const points = sampled.map((p, i) => {
+              const x = (i / (sampled.length - 1)) * 100;
+              let pct = ((pMax - p) / tRange) * 100;
+              const center = 50 + panOffset;
+              const y = (pct - center) * zoom + 50;
+              return { x, y };
+            });
+
+            if (points.length < 2) return null;
+            const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+            return <path d={pathD} fill="none" stroke="rgba(148,163,184,0.3)" strokeWidth="0.5" />;
+          })()}
+        </svg>
+      )}
+
+      {/* #22: Context Menu */}
+      {contextMenu && (
+        <div className="fixed z-[500] bg-terminal-bg border border-terminal-border rounded-lg shadow-2xl py-1 min-w-[160px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <div className="px-3 py-1 border-b border-terminal-border">
+            <span className="text-[9px] text-slate-400 font-medium">{contextMenu.level.name || contextMenu.level.pool_type} @ {contextMenu.level.price.toFixed(0)}</span>
+          </div>
+          <button onClick={() => { updateLevel(contextMenu.level.id, { sweep_status: 'Swept' }); closeContextMenu(); }}
+            className="w-full px-3 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+            <span>💥</span> Mark as Swept
+          </button>
+          <button onClick={() => { updateLevel(contextMenu.level.id, { sweep_status: 'Tested' }); closeContextMenu(); }}
+            className="w-full px-3 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+            <span>🔍</span> Mark as Tested
+          </button>
+          <button onClick={() => { updateLevel(contextMenu.level.id, { sweep_status: 'Untouched' }); closeContextMenu(); }}
+            className="w-full px-3 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+            <span>✨</span> Reset to Untouched
+          </button>
+          <button onClick={() => { removeLevel(contextMenu.level.id); closeContextMenu(); }}
+            className="w-full px-3 py-1.5 text-left text-[10px] text-red-400 hover:bg-red-500/10 flex items-center gap-2">
+            <span>🗑️</span> Delete Level
+          </button>
+          <div className="border-t border-terminal-border mt-0.5 pt-0.5">
+            <button onClick={() => {
+              alertZoneManager.addZone(contextMenu.level.price + 5, contextMenu.level.price - 5, `Zone: ${contextMenu.level.name || contextMenu.level.pool_type}`);
+              closeContextMenu();
+            }}
+              className="w-full px-3 py-1.5 text-left text-[10px] text-amber-400 hover:bg-amber-500/10 flex items-center gap-2">
+              <span>🔔</span> Add Alert Zone (±5pts)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Candle-Free Intelligence Overlay */}
       <LadderIntelligenceOverlay />

@@ -20,6 +20,7 @@ import GhostTraderPanel from '@/components/trading/GhostTraderPanel';
 import GamePlanPanel from '@/components/trading/GamePlanPanel';
 import WeeklyHeatmap from '@/components/trading/WeeklyHeatmap';
 import AlertZonesPanel from '@/components/trading/AlertZonesPanel';
+import GamificationPanel from '@/components/trading/GamificationPanel';
 import { cn } from '@/lib/utils';
 
 export default function ResearchCockpit() {
@@ -223,6 +224,11 @@ export default function ResearchCockpit() {
                 {/* Weekly Performance */}
                 <div className="p-3 border-b border-terminal-border">
                   <WeeklyHeatmap />
+                </div>
+
+                {/* Gamification (Achievements, Challenges, Streak, Events, Webhook) */}
+                <div className="p-3 border-b border-terminal-border">
+                  <GamificationPanel />
                 </div>
 
                 {/* Session Notes */}
