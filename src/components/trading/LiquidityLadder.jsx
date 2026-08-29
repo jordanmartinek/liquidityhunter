@@ -404,6 +404,21 @@ export default function LiquidityLadder() {
   }, [density]);
   const comfortable = density === 'comfortable';
 
+  // Layer visibility — lets you declutter the ladder while marking levels.
+  // All on by default; persisted to localStorage.
+  const defaultLayers = { zones: true, patterns: true, trails: true, heatmap: true, minimap: true };
+  const [layers, setLayers] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('lh_ladder_layers') || '{}');
+      return { ...defaultLayers, ...saved };
+    } catch { return defaultLayers; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_layers', JSON.stringify(layers)); } catch {}
+  }, [layers]);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const toggleLayer = useCallback((key) => setLayers(prev => ({ ...prev, [key]: !prev[key] })), []);
+
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
   const [killZoneOpacity, setKillZoneOpacity] = useState(1);
@@ -923,8 +938,10 @@ export default function LiquidityLadder() {
       }}
     >
       {/* Liquidity Gradient Heatmap background */}
-      <div className="absolute inset-0 pointer-events-none z-[1]"
-        style={{ background: heatmapGradient }} />
+      {layers.heatmap && (
+        <div className="absolute inset-0 pointer-events-none z-[1]"
+          style={{ background: heatmapGradient }} />
+      )}
 
       {/* What-If summary panel */}
       {whatIfActive && whatIfAnalysis && (
@@ -1026,10 +1043,49 @@ export default function LiquidityLadder() {
         >
           {comfortable ? '🔎 large' : '🔎 text'}
         </button>
+        <button
+          onClick={() => setLayersOpen(o => !o)}
+          aria-label="Show or hide overlay layers" aria-expanded={layersOpen}
+          title="Show/hide overlays (zones, patterns, trails, heatmap, mini-map)"
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            layersOpen
+              ? 'bg-slate-500/25 border-slate-400/60 text-slate-200'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          ▤ Layers
+        </button>
       </div>
 
+      {/* Layer visibility panel */}
+      {layersOpen && (
+        <div className="absolute top-8 right-1 z-40 bg-terminal-bg/95 border border-terminal-border rounded-md p-2 shadow-xl min-w-[110px]" role="group" aria-label="Overlay layers"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="text-[9px] font-bold text-slate-300 mb-1">Overlays</div>
+          {[
+            ['zones', '🟦 Zones'],
+            ['patterns', '📐 Patterns'],
+            ['trails', '〰 Trails'],
+            ['heatmap', '🌡 Heatmap'],
+            ['minimap', '🗺 Mini-map'],
+          ].map(([key, label]) => (
+            <label key={key} className="flex items-center gap-1.5 py-0.5 text-[9px] text-slate-300 cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={!!layers[key]}
+                onChange={() => toggleLayer(key)}
+                className="accent-teal-400 w-3 h-3"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+
       {/* #9: Velocity Chevrons on center rail */}
-      {velocity.chevrons > 0 && priceMarkerPercent !== null && (
+      {layers.patterns && velocity.chevrons > 0 && priceMarkerPercent !== null && (
         <div className="absolute left-1/2 -translate-x-1/2 z-15 pointer-events-none"
           style={{ top: `${priceMarkerPercent}%`, transform: 'translateX(-50%) translateY(-50%)' }}>
           <div className={cn('flex flex-col items-center gap-0 text-[10px] font-bold',
@@ -1057,7 +1113,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #7: Session Range Bands (Asia + London) */}
-      {sessionLevelsState && sessionLevelsState.asia?.high && sessionLevelsState.asia?.low && (
+      {layers.zones && sessionLevelsState && sessionLevelsState.asia?.high && sessionLevelsState.asia?.low && (
         (() => {
           const topPct = priceToPercent(sessionLevelsState.asia.high);
           const botPct = priceToPercent(sessionLevelsState.asia.low);
@@ -1069,7 +1125,7 @@ export default function LiquidityLadder() {
           );
         })()
       )}
-      {sessionLevelsState && sessionLevelsState.london?.high && sessionLevelsState.london?.low && (
+      {layers.zones && sessionLevelsState && sessionLevelsState.london?.high && sessionLevelsState.london?.low && (
         (() => {
           const topPct = priceToPercent(sessionLevelsState.london.high);
           const botPct = priceToPercent(sessionLevelsState.london.low);
@@ -1083,7 +1139,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #4: Magnet Zone bands */}
-      {magnetZones.map(zone => {
+      {layers.zones && magnetZones.map(zone => {
         const topPct = priceToPercent(zone.highPrice);
         const botPct = priceToPercent(zone.lowPrice);
         return (
@@ -1098,7 +1154,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* Alert Zones — custom user-defined price alert bands */}
-      {alertZoneManager.getActiveZones().map(zone => {
+      {layers.zones && alertZoneManager.getActiveZones().map(zone => {
         const topPct = priceToPercent(zone.highPrice);
         const botPct = priceToPercent(zone.lowPrice);
         const priceInZone = lastPrice >= zone.lowPrice && lastPrice <= zone.highPrice;
@@ -1118,7 +1174,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* Fib Auto-Zones — 0.705-0.886 retracement bands from displacements */}
-      {fibZoneTracker.getActiveZones().map(zone => {
+      {layers.zones && fibZoneTracker.getActiveZones().map(zone => {
         const topPct = priceToPercent(zone.highPrice);
         const botPct = priceToPercent(zone.lowPrice);
         return (
@@ -1133,7 +1189,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* Head & Shoulders Pattern Indicators (max 2 per level) */}
-      {hasPatternManager.getPatterns().map(pattern => {
+      {layers.patterns && hasPatternManager.getPatterns().map(pattern => {
         const headPct = priceToPercent(pattern.head);
         const isBearish = pattern.type === 'h_and_s_top';
         return (
@@ -1186,10 +1242,10 @@ export default function LiquidityLadder() {
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
 
       {/* Daily Range Meter (left side) */}
-      <DailyRangeMeter priceToPercent={priceToPercent} />
+      {layers.minimap && <DailyRangeMeter priceToPercent={priceToPercent} />}
 
       {/* #11: Mini-Map */}
-      <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />
+      {layers.minimap && <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />}
 
       {/* Time axis (bottom) */}
       {priceLine.length > 5 && (
@@ -1209,7 +1265,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* Price trail (thin dots showing recent price path) */}
-      {trailPositions.length > 2 && (
+      {layers.trails && trailPositions.length > 2 && (
         <div className="absolute left-1/2 top-4 bottom-4 -translate-x-1/2 pointer-events-none z-5">
           {trailPositions.map((pct, i) => (
             <div key={i} className="absolute left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/20"
@@ -1353,7 +1409,7 @@ export default function LiquidityLadder() {
         })}
 
         {/* AVWAP Lines from active displacements */}
-        {displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
+        {layers.patterns && displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
           const avwapPercent = priceToPercent(disp.avwapValue);
           const isBullish = disp.direction === 'bullish';
           const isEntry = disp.state === 'at_avwap';
@@ -1437,7 +1493,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #8: Liquidity Void Shading */}
-      {liquidityVoids.map(v => {
+      {layers.zones && liquidityVoids.map(v => {
         const topPct = priceToPercent(v.highPrice);
         const botPct = priceToPercent(v.lowPrice);
         return (
@@ -1450,7 +1506,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* #10: Opening Range Lines */}
-      {openingRange && (
+      {layers.zones && openingRange && (
         <>
           <div className="absolute left-0 right-0 pointer-events-none z-[4] flex items-center"
             style={{ top: `${priceToPercent(openingRange.high)}%`, transform: 'translateY(-50%)' }}>
@@ -1466,7 +1522,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #14: Gravity Particles (subtle dots pulling toward high-prob levels) */}
-      {gravityWeights.slice(0, 3).map((gw, i) => {
+      {layers.trails && gravityWeights.slice(0, 3).map((gw, i) => {
         const levelPct = priceToPercent(gw.price);
         const pricePct = priceMarkerPercent || 50;
         // Draw 2-3 particles between price and level
@@ -1491,7 +1547,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* #15: Trail History (ghosted path since session start) */}
-      {trailPoints.length > 10 && (
+      {layers.trails && trailPoints.length > 10 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-[2] opacity-20" viewBox="0 0 100 100" preserveAspectRatio="none">
           {(() => {
             const step = Math.max(1, Math.floor(trailPoints.length / 200));
