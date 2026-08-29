@@ -18,6 +18,7 @@ import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity } from '@/lib/ladderExtras';
 import { ladderAudio } from '@/lib/ladderAudio';
+import { requestPermission as requestNotifyPermission, sendNotification } from '@/lib/notifications';
 import { alertZoneManager, fibZoneTracker } from '@/lib/bangerFeatures';
 import { hasPatternManager } from '@/lib/headAndShoulders';
 import DailyRangeMeter from './DailyRangeMeter';
@@ -419,6 +420,42 @@ export default function LiquidityLadder() {
   const [layersOpen, setLayersOpen] = useState(false);
   const toggleLayer = useCallback((key) => setLayers(prev => ({ ...prev, [key]: !prev[key] })), []);
 
+  // Alerts (sound + browser notifications). Both need a user gesture: sound to
+  // unlock the AudioContext, notifications to grant permission.
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(() => {
+    try { return ladderAudio.isEnabled(); } catch { return false; }
+  });
+  const [notifyOn, setNotifyOn] = useState(() => {
+    try { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; } catch { return false; }
+  });
+  // Keep a live ref so the per-tick alert path can fire notifications without re-subscribing.
+  const notifyOnRef = useRef(notifyOn);
+  useEffect(() => { notifyOnRef.current = notifyOn; }, [notifyOn]);
+
+  const toggleSound = useCallback(() => {
+    setSoundOn(prev => {
+      const next = !prev;
+      try {
+        ladderAudio.setEnabled(next);
+        if (next) ladderAudio.init(); // unlock AudioContext on this user gesture
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const enableNotifications = useCallback(async () => {
+    try {
+      const granted = await requestNotifyPermission();
+      setNotifyOn(granted);
+    } catch { setNotifyOn(false); }
+  }, []);
+
+  const testAlerts = useCallback(() => {
+    try { if (soundOn) { ladderAudio.init(); ladderAudio.entryBell?.(); } } catch {}
+    try { if (notifyOnRef.current) sendNotification('🔔 Liquidity Hunter', 'Test alert — alerts are working.', 'lh_test'); } catch {}
+  }, [soundOn]);
+
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
   const [killZoneOpacity, setKillZoneOpacity] = useState(1);
@@ -617,7 +654,10 @@ export default function LiquidityLadder() {
     if (sfpDetector.getDetections().length > 0) {
       const latest = sfpDetector.getDetections().slice(-1)[0];
       if (latest && Date.now() - latest.time < 2000) {
-        webhookAlerts.send('🔄 SFP Detected', `${latest.direction} SFP at ${latest.levelName} (${latest.levelPrice})`);
+        const body = `${latest.direction} SFP at ${latest.levelName} (${latest.levelPrice})`;
+        webhookAlerts.send('🔄 SFP Detected', body);
+        // Also fire a native browser notification if the user enabled them
+        if (notifyOnRef.current) { try { sendNotification('🔄 SFP Detected', body, 'lh_sfp'); } catch {} }
       }
     }
   }, [lastPrice]);
@@ -1056,7 +1096,44 @@ export default function LiquidityLadder() {
         >
           ▤ Layers
         </button>
+        <button
+          onClick={() => setAlertsOpen(o => !o)}
+          aria-label="Alert settings (sound and notifications)" aria-expanded={alertsOpen}
+          title="Enable sound and browser notifications for alerts"
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            (soundOn || notifyOn)
+              ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          🔔 Alerts
+        </button>
       </div>
+
+      {/* Alerts panel */}
+      {alertsOpen && (
+        <div className="absolute top-8 right-1 z-40 bg-terminal-bg/95 border border-terminal-border rounded-md p-2 shadow-xl min-w-[150px]" role="group" aria-label="Alert settings"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="text-[9px] font-bold text-slate-300 mb-1">Alerts</div>
+          <label className="flex items-center gap-1.5 py-0.5 text-[9px] text-slate-300 cursor-pointer hover:text-white">
+            <input type="checkbox" checked={soundOn} onChange={toggleSound} className="accent-emerald-400 w-3 h-3" />
+            🔊 Sound cues
+          </label>
+          <div className="flex items-center justify-between py-0.5 text-[9px] text-slate-300">
+            <span>🔔 Notifications</span>
+            {notifyOn
+              ? <span className="text-emerald-400 text-[8px]">on</span>
+              : <button onClick={enableNotifications} className="text-[8px] px-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200">Enable</button>}
+          </div>
+          <button onClick={testAlerts}
+            className="mt-1 w-full text-[8px] px-1 py-0.5 rounded bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-600/50">
+            Test alert
+          </button>
+          <div className="text-[7px] text-slate-500 mt-1 leading-tight">Sound needs one click to unlock; notifications ask for permission.</div>
+        </div>
+      )}
 
       {/* Layer visibility panel */}
       {layersOpen && (
