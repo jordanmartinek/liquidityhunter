@@ -43,8 +43,7 @@ export default function GhostTraderPanel() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider font-medium text-indigo-400">👻 Ghost Trader</span>
+      <div className="flex items-center justify-end">
         <button onClick={() => setShowForm(!showForm)}
           className="text-[9px] text-slate-500 hover:text-indigo-400 px-1.5 py-0.5 rounded border border-terminal-border hover:border-indigo-500/30">
           {showForm ? '✕' : '+ Ghost Entry'}

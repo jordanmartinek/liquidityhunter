@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowUp, ArrowDown, Minus, Target } from 'lucide-react';
+import { ArrowUp, ArrowDown, Minus } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
 import { DRAW_DIRECTIONS } from '@/lib/constants';
 
@@ -22,11 +22,7 @@ export default function DrawIndicator() {
   return (
     <div className={`rounded border p-2 ${getColor()}`}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-1.5">
-          <Target size={11} className="text-slate-500" />
-          <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Draw</span>
-        </div>
+      <div className="flex items-center justify-end mb-1.5">
         {getIcon()}
       </div>
 

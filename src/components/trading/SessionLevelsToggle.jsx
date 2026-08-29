@@ -38,9 +38,6 @@ export default function SessionLevelsToggle() {
       {/* Header with toggle */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wider font-medium text-violet-400">
-            🕐 Session Levels
-          </span>
           <SessionBadge session={currentSession} />
         </div>
         <div className="flex items-center gap-1.5">

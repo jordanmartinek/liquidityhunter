@@ -217,10 +217,7 @@ export default function DisplacementPanel() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 group">
-          <span className="text-[10px] text-slate-600 group-hover:text-slate-400">{expanded ? '▼' : '▶'}</span>
-          <span className="text-[10px] uppercase tracking-wider font-medium text-cyan-400">
-            ⚡ Displacement Detector
-          </span>
+          <span className="text-[9px] text-slate-600 group-hover:text-slate-400">{expanded ? '▼ details' : '▶ details'}</span>
           {activeDisps.length > 0 && (
             <span className="w-4 h-4 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
               <span className="text-[8px] text-cyan-300 font-bold">{activeDisps.length}</span>
