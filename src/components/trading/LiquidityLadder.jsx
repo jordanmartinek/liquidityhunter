@@ -423,6 +423,22 @@ export default function LiquidityLadder() {
   const [layersOpen, setLayersOpen] = useState(false);
   const toggleLayer = useCallback((key) => setLayers(prev => ({ ...prev, [key]: !prev[key] })), []);
 
+  // Focus / Zen mode — hides ALL overlay groups at once, leaving just the
+  // price line, your levels (rungs) and the crosshair. Persisted.
+  const [focusMode, setFocusMode] = useState(() => {
+    try { return localStorage.getItem('lh_ladder_focus') === 'on'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_focus', focusMode ? 'on' : 'off'); } catch {}
+  }, [focusMode]);
+  // Effective layer visibility: everything off while in focus mode.
+  const effectiveLayers = useMemo(
+    () => focusMode
+      ? { zones: false, patterns: false, trails: false, heatmap: false, minimap: false }
+      : layers,
+    [focusMode, layers]
+  );
+
   // Alerts (sound + browser notifications). Both need a user gesture: sound to
   // unlock the AudioContext, notifications to grant permission.
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -1066,7 +1082,7 @@ export default function LiquidityLadder() {
       }}
     >
       {/* Liquidity Gradient Heatmap background */}
-      {layers.heatmap && (
+      {effectiveLayers.heatmap && (
         <div className="absolute inset-0 pointer-events-none z-[1]"
           style={{ background: heatmapGradient }} />
       )}
@@ -1206,6 +1222,21 @@ export default function LiquidityLadder() {
           ▤ Layers
         </button>
         <button
+          onClick={() => setFocusMode(f => !f)}
+          aria-label="Toggle focus mode" aria-pressed={focusMode}
+          title={focusMode
+            ? 'Focus mode ON — showing only price, your levels & crosshair. Click to restore overlays.'
+            : 'Focus mode — hide all overlays and show only price, your levels & crosshair'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            focusMode
+              ? 'bg-indigo-500/25 border-indigo-400/60 text-indigo-200'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          {focusMode ? '🎯 focus on' : '🎯 focus'}
+        </button>
+        <button
           onClick={() => setAlertsOpen(o => !o)}
           aria-label="Alert settings (sound and notifications)" aria-expanded={alertsOpen}
           title="Enable sound and browser notifications for alerts"
@@ -1271,7 +1302,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #9: Velocity Chevrons on center rail */}
-      {layers.patterns && velocity.chevrons > 0 && priceMarkerPercent !== null && (
+      {effectiveLayers.patterns && velocity.chevrons > 0 && priceMarkerPercent !== null && (
         <div className="absolute left-1/2 -translate-x-1/2 z-15 pointer-events-none"
           style={{ top: `${priceMarkerPercent}%`, transform: 'translateX(-50%) translateY(-50%)' }}>
           <div className={cn('flex flex-col items-center gap-0 text-[10px] font-bold',
@@ -1299,7 +1330,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #7: Session Range Bands (Asia + London) */}
-      {layers.zones && sessionLevelsState && sessionLevelsState.asia?.high && sessionLevelsState.asia?.low && (
+      {effectiveLayers.zones && sessionLevelsState && sessionLevelsState.asia?.high && sessionLevelsState.asia?.low && (
         (() => {
           const topPct = priceToPercent(sessionLevelsState.asia.high);
           const botPct = priceToPercent(sessionLevelsState.asia.low);
@@ -1311,7 +1342,7 @@ export default function LiquidityLadder() {
           );
         })()
       )}
-      {layers.zones && sessionLevelsState && sessionLevelsState.london?.high && sessionLevelsState.london?.low && (
+      {effectiveLayers.zones && sessionLevelsState && sessionLevelsState.london?.high && sessionLevelsState.london?.low && (
         (() => {
           const topPct = priceToPercent(sessionLevelsState.london.high);
           const botPct = priceToPercent(sessionLevelsState.london.low);
@@ -1325,7 +1356,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #4: Magnet Zone bands */}
-      {layers.zones && magnetZones.map(zone => {
+      {effectiveLayers.zones && magnetZones.map(zone => {
         const topPct = priceToPercent(zone.highPrice);
         const botPct = priceToPercent(zone.lowPrice);
         return (
@@ -1340,7 +1371,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* Alert Zones — custom user-defined price alert bands */}
-      {layers.zones && alertZoneManager.getActiveZones().map(zone => {
+      {effectiveLayers.zones && alertZoneManager.getActiveZones().map(zone => {
         const topPct = priceToPercent(zone.highPrice);
         const botPct = priceToPercent(zone.lowPrice);
         const priceInZone = lastPrice >= zone.lowPrice && lastPrice <= zone.highPrice;
@@ -1360,7 +1391,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* Head & Shoulders Pattern Indicators (max 2 per level) */}
-      {layers.patterns && hasPatternManager.getPatterns().map(pattern => {
+      {effectiveLayers.patterns && hasPatternManager.getPatterns().map(pattern => {
         const headPct = priceToPercent(pattern.head);
         const isBearish = pattern.type === 'h_and_s_top';
         return (
@@ -1413,10 +1444,10 @@ export default function LiquidityLadder() {
       <div className="absolute left-1/2 top-4 bottom-4 w-px bg-terminal-border/50 -translate-x-1/2" />
 
       {/* Daily Range Meter (left side) */}
-      {layers.minimap && <DailyRangeMeter priceToPercent={priceToPercent} />}
+      {effectiveLayers.minimap && <DailyRangeMeter priceToPercent={priceToPercent} />}
 
       {/* #11: Mini-Map */}
-      {layers.minimap && <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />}
+      {effectiveLayers.minimap && <MiniMap allLevels={allLevels} lastPrice={lastPrice} zoom={zoom} panOffset={panOffset} positions={positions} />}
 
       {/* Time axis (bottom) */}
       {priceLine.length > 5 && (
@@ -1436,7 +1467,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* Price trail (thin dots showing recent price path) */}
-      {layers.trails && trailPositions.length > 2 && (
+      {effectiveLayers.trails && trailPositions.length > 2 && (
         <div className="absolute left-1/2 top-4 bottom-4 -translate-x-1/2 pointer-events-none z-5">
           {trailPositions.map((pct, i) => (
             <div key={i} className="absolute left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-white/20"
@@ -1580,7 +1611,7 @@ export default function LiquidityLadder() {
         })}
 
         {/* AVWAP Lines from active displacements */}
-        {layers.patterns && displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
+        {effectiveLayers.patterns && displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
           const avwapPercent = priceToPercent(disp.avwapValue);
           const isBullish = disp.direction === 'bullish';
           const isEntry = disp.state === 'at_avwap';
@@ -1664,7 +1695,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #8: Liquidity Void Shading */}
-      {layers.zones && liquidityVoids.map(v => {
+      {effectiveLayers.zones && liquidityVoids.map(v => {
         const topPct = priceToPercent(v.highPrice);
         const botPct = priceToPercent(v.lowPrice);
         return (
@@ -1677,7 +1708,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* #10: Opening Range Lines */}
-      {layers.zones && openingRange && (
+      {effectiveLayers.zones && openingRange && (
         <>
           <div className="absolute left-0 right-0 pointer-events-none z-[4] flex items-center"
             style={{ top: `${priceToPercent(openingRange.high)}%`, transform: 'translateY(-50%)' }}>
@@ -1693,7 +1724,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* #14: Gravity Particles (subtle dots pulling toward high-prob levels) */}
-      {layers.trails && gravityWeights.slice(0, 3).map((gw, i) => {
+      {effectiveLayers.trails && gravityWeights.slice(0, 3).map((gw, i) => {
         const levelPct = priceToPercent(gw.price);
         const pricePct = priceMarkerPercent || 50;
         // Draw 2-3 particles between price and level
@@ -1718,7 +1749,7 @@ export default function LiquidityLadder() {
       })}
 
       {/* #15: Trail History (ghosted path since session start) */}
-      {layers.trails && trailPoints.length > 10 && (
+      {effectiveLayers.trails && trailPoints.length > 10 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-[2] opacity-20" viewBox="0 0 100 100" preserveAspectRatio="none">
           {(() => {
             const step = Math.max(1, Math.floor(trailPoints.length / 200));
