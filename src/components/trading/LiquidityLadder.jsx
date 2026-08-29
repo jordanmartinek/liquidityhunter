@@ -353,6 +353,9 @@ export default function LiquidityLadder() {
   const [xPan, setXPan] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ y: 0, x: 0, panAtStart: 0, xPanAtStart: 0 });
+  // Touch: pinch-to-zoom + long-press-to-open-context-menu bookkeeping
+  const pinchRef = useRef({ active: false, startDist: 0, startZoom: 1 });
+  const longPressRef = useRef({ timer: null, x: 0, y: 0 });
 
   // #5: Time-at-Level tracking
   const timeAtLevelRef = useRef({});
@@ -767,15 +770,66 @@ export default function LiquidityLadder() {
   // Close context menu
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  // Touch support — same two-axis panning as mouse
+  // Distance between two touch points (for pinch zoom)
+  const _touchDist = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+
+  // Cancel a pending long-press
+  const _cancelLongPress = () => {
+    if (longPressRef.current.timer) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current.timer = null;
+    }
+  };
+
+  // Touch support — single finger pans (+ long-press context menu),
+  // two fingers pinch-to-zoom.
   const handleTouchStart = (e) => {
+    if (e.touches.length >= 2) {
+      // Begin pinch: record starting finger distance + current zoom
+      _cancelLongPress();
+      setIsDragging(false);
+      pinchRef.current = { active: true, startDist: _touchDist(e.touches[0], e.touches[1]), startZoom: zoom };
+      return;
+    }
     const touch = e.touches[0];
     setIsDragging(true);
     dragStartRef.current = { y: touch.clientY, x: touch.clientX, panAtStart: panOffset, xPanAtStart: xPan };
+
+    // Long-press → open the context menu on the nearest rung (touch equivalent
+    // of right-click). Cancelled if the finger moves or lifts first.
+    _cancelLongPress();
+    longPressRef.current = { x: touch.clientX, y: touch.clientY, timer: setTimeout(() => {
+      const res = clientYToPrice(touch.clientY);
+      if (res && positions.length) {
+        // Nearest level by price
+        let nearest = null, best = Infinity;
+        for (const p of positions) {
+          const d = Math.abs(p.level.price - res.price);
+          if (d < best) { best = d; nearest = p.level; }
+        }
+        if (nearest) {
+          setIsDragging(false);
+          setContextMenu({ x: touch.clientX, y: touch.clientY, level: nearest });
+        }
+      }
+    }, 500) };
   };
   const handleTouchMove = (e) => {
+    // Pinch-to-zoom (two fingers)
+    if (pinchRef.current.active && e.touches.length >= 2) {
+      const dist = _touchDist(e.touches[0], e.touches[1]);
+      if (pinchRef.current.startDist > 0) {
+        const ratio = dist / pinchRef.current.startDist;
+        setZoom(Math.max(0.3, Math.min(15, pinchRef.current.startZoom * ratio)));
+      }
+      return;
+    }
     const touch = e.touches[0];
     updateCursor(touch.clientY);
+    // Any real movement cancels the long-press
+    if (Math.hypot(touch.clientX - longPressRef.current.x, touch.clientY - longPressRef.current.y) > 8) {
+      _cancelLongPress();
+    }
     if (!isDragging) return;
     const containerHeight = containerRef.current?.offsetHeight || 500;
     const containerWidth = containerRef.current?.offsetWidth || 500;
@@ -790,7 +844,15 @@ export default function LiquidityLadder() {
     const xPanDelta = -(dx / containerWidth) * 100;
     setXPan(Math.max(0, Math.min(60, dragStartRef.current.xPanAtStart + xPanDelta)));
   };
-  const handleTouchEnd = () => { setIsDragging(false); setCursor(null); };
+  const handleTouchEnd = (e) => {
+    _cancelLongPress();
+    // End pinch only once all fingers lift
+    if (pinchRef.current.active && (!e || !e.touches || e.touches.length < 2)) {
+      pinchRef.current.active = false;
+    }
+    setIsDragging(false);
+    setCursor(null);
+  };
 
   // Reset view — recenter the ladder but keep the current zoom level
   const resetView = () => { setPanOffset(0); setXPan(0); };
