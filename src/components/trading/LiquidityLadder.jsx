@@ -439,6 +439,20 @@ export default function LiquidityLadder() {
     [focusMode, layers]
   );
 
+  // Measure tool — drag between two points to read the price distance
+  // (points + %). While active, panning/quick-add are suspended.
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measureAnchor, setMeasureAnchor] = useState(null);  // { pct, price }
+  const [measureCurrent, setMeasureCurrent] = useState(null); // { pct, price }
+  const measuringRef = useRef(false);
+  const toggleMeasure = useCallback(() => {
+    setMeasureMode(prev => {
+      const next = !prev;
+      if (!next) { setMeasureAnchor(null); setMeasureCurrent(null); measuringRef.current = false; }
+      return next;
+    });
+  }, []);
+
   // Alerts (sound + browser notifications). Both need a user gesture: sound to
   // unlock the AudioContext, notifications to grant permission.
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -718,12 +732,31 @@ export default function LiquidityLadder() {
   // Vertical drag pans price (panOffset); horizontal drag pans the price line (xPan).
   const handleMouseDown = (e) => {
     if (dragEditLevel) return;
+    // Measure tool: start a new measurement from this point (suspends panning)
+    if (measureMode) {
+      const res = clientYToPrice(e.clientY);
+      if (res) {
+        measuringRef.current = true;
+        setMeasureAnchor(res);
+        setMeasureCurrent(res);
+      }
+      return;
+    }
     setIsDragging(true);
     dragStartRef.current = { y: e.clientY, x: e.clientX, panAtStart: panOffset, xPanAtStart: xPan };
   };
   const handleMouseMove = (e) => {
     // Update the cursor crosshair (price readout) on every move
     updateCursor(e.clientY);
+
+    // Measure tool: extend the current measurement while dragging
+    if (measureMode) {
+      if (measuringRef.current) {
+        const res = clientYToPrice(e.clientY);
+        if (res) setMeasureCurrent(res);
+      }
+      return;
+    }
 
     // What-If mode: track a hypothetical price under the cursor
     if (whatIfActive) {
@@ -760,6 +793,11 @@ export default function LiquidityLadder() {
     setXPan(Math.max(0, Math.min(60, dragStartRef.current.xPanAtStart + xPanDelta)));
   };
   const handleMouseUp = (e) => {
+    // Measure tool: finish the drag but keep the measurement pinned on screen
+    if (measureMode) {
+      measuringRef.current = false;
+      return;
+    }
     // #12: Complete drag-to-edit
     if (dragEditLevel && dragEditY !== null) {
       const containerRect = containerRef.current?.getBoundingClientRect();
@@ -791,6 +829,7 @@ export default function LiquidityLadder() {
 
   // #21: Quick-add level (double-click on ladder)
   const handleDoubleClick = useCallback((e) => {
+    if (measureMode) return; // don't quick-add while measuring
     const res = clientYToPrice(e.clientY);
     if (!res) return;
     const snapped = maybeSnap(res.price, e);
@@ -802,7 +841,7 @@ export default function LiquidityLadder() {
         addLevel({ price: parseFloat(price.toFixed(2)), name: name || `Level ${price.toFixed(0)}`, side, pool_type: 'Custom', timeframe: '1H', strength: 3, sweep_status: 'Untouched' });
       }
     }
-  }, [clientYToPrice, lastPrice, addLevel, maybeSnap]);
+  }, [clientYToPrice, lastPrice, addLevel, maybeSnap, measureMode]);
 
   // #22: Right-click context menu on rungs
   const handleRungContextMenu = useCallback((e, level) => {
@@ -1076,7 +1115,7 @@ export default function LiquidityLadder() {
       onDoubleClick={handleDoubleClick}
       onClick={closeContextMenu}
       style={{
-        cursor: dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
+        cursor: measureMode ? 'crosshair' : dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
         opacity: killZoneOpacity,
         transition: 'opacity 2s ease',
       }}
@@ -1235,6 +1274,21 @@ export default function LiquidityLadder() {
           )}
         >
           {focusMode ? '🎯 focus on' : '🎯 focus'}
+        </button>
+        <button
+          onClick={toggleMeasure}
+          aria-label="Measure tool" aria-pressed={measureMode}
+          title={measureMode
+            ? 'Measure tool ON — drag between two points to read the price distance. Click to exit.'
+            : 'Measure tool — drag between two points to read distance in points & %'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            measureMode
+              ? 'bg-cyan-500/25 border-cyan-400/60 text-cyan-200'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          📏 measure
         </button>
         <button
           onClick={() => setAlertsOpen(o => !o)}
@@ -1684,7 +1738,7 @@ export default function LiquidityLadder() {
       </div>
 
       {/* Cursor crosshair — horizontal guide line + price readout that follows the mouse */}
-      {cursor && cursor.price > 0 && !isDragging && !dragEditLevel && (
+      {cursor && cursor.price > 0 && !isDragging && !dragEditLevel && !measureMode && (
         <div className="absolute left-0 right-0 flex items-center z-[90] pointer-events-none"
           style={{ top: `${cursor.pct}%`, transform: 'translateY(-50%)' }}>
           <div className="flex-1 h-px bg-teal-400/40 border-t border-dashed border-teal-400/50" />
@@ -1693,6 +1747,35 @@ export default function LiquidityLadder() {
           </span>
         </div>
       )}
+
+      {/* Measure tool — two anchor lines, a vertical span, and a delta readout */}
+      {measureMode && measureAnchor && measureCurrent && (() => {
+        const aPct = measureAnchor.pct, bPct = measureCurrent.pct;
+        const top = Math.min(aPct, bPct);
+        const height = Math.abs(bPct - aPct);
+        const deltaPts = measureCurrent.price - measureAnchor.price;
+        const pctChange = measureAnchor.price !== 0 ? (deltaPts / measureAnchor.price) * 100 : 0;
+        const up = deltaPts >= 0;
+        return (
+          <div className="absolute left-0 right-0 z-[95] pointer-events-none">
+            {/* Anchor line */}
+            <div className="absolute left-0 right-0 h-px bg-cyan-400/70" style={{ top: `${aPct}%` }} />
+            {/* Current line */}
+            <div className="absolute left-0 right-0 h-px bg-cyan-300/90" style={{ top: `${bPct}%` }} />
+            {/* Vertical span band */}
+            <div className="absolute left-1/2 -translate-x-1/2 w-16 bg-cyan-400/10 border-x border-cyan-400/30"
+              style={{ top: `${top}%`, height: `${height}%` }} />
+            {/* Delta readout at the current point */}
+            <div className="absolute left-1/2 -translate-x-1/2" style={{ top: `${bPct}%`, transform: 'translate(-50%, -50%)' }}>
+              <div className={cn('text-[10px] font-mono font-bold whitespace-nowrap px-1.5 py-0.5 rounded border shadow-sm',
+                up ? 'text-emerald-100 bg-emerald-900/90 border-emerald-500/60'
+                   : 'text-red-100 bg-red-900/90 border-red-500/60')}>
+                {up ? '▲' : '▼'} {Math.abs(deltaPts).toFixed(2)} pts · {Math.abs(pctChange).toFixed(2)}%
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* #8: Liquidity Void Shading */}
       {effectiveLayers.zones && liquidityVoids.map(v => {
