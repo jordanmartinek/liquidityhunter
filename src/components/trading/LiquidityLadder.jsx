@@ -34,6 +34,7 @@ import {
   computeDynamicWidth,
   trailHistory,
   webhookAlerts,
+  sweepReactionTracker,
 } from '@/lib/ladderEnhancements';
 
 /**
@@ -83,7 +84,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf, comfortable,
+  blurEnabled, whatIf, comfortable, sweepReaction,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -211,6 +212,18 @@ function Rung({
           {/* SFP badge */}
           {hasSFP && !isSwept && (
             <span className="text-[7px] mr-0.5 animate-pulse" title="Swing Failure Pattern detected">🔄</span>
+          )}
+          {/* Sweep → reaction tag (on swept levels) */}
+          {isSwept && sweepReaction && (
+            <span className={cn('text-[7px] mr-0.5 font-bold',
+              sweepReaction.status === 'reversal' ? 'text-emerald-400' :
+              sweepReaction.status === 'continuation' ? 'text-red-400' :
+              'text-slate-400'
+            )}
+              title={`After sweep: ${sweepReaction.status} (${sweepReaction.movePts} pts)`}>
+              {sweepReaction.status === 'reversal' ? '↩︎' :
+               sweepReaction.status === 'continuation' ? '↠' : '≈'}
+            </span>
           )}
           {/* Auto-session badge */}
           {isAutoSession && !isSwept && (
@@ -373,6 +386,7 @@ export default function LiquidityLadder() {
 
   // New enhancement states
   const [sfpDetections, setSfpDetections] = useState([]);
+  const [sweepReactions, setSweepReactions] = useState({}); // levelId -> { status, movePts }
   const [liquidityVoids, setLiquidityVoids] = useState([]);
   const [openingRange, setOpeningRange] = useState(null);
   const [gravityWeights, setGravityWeights] = useState([]);
@@ -685,6 +699,12 @@ export default function LiquidityLadder() {
     sfpDetector.check(priceLineRef.current, activeLevelsForSFP, lastPrice);
     if (priceLineRef.current.length % 5 === 0) {
       setSfpDetections([...sfpDetector.getDetections()]);
+    }
+
+    // Sweep → reaction tagging (classify how price behaves after a sweep)
+    sweepReactionTracker.update(curLevels, lastPrice);
+    if (priceLineRef.current.length % 5 === 0) {
+      setSweepReactions(sweepReactionTracker.getAll());
     }
 
     // Opening Range tracking
@@ -1636,6 +1656,9 @@ export default function LiquidityLadder() {
           // What-If preview for this level (would-sweep + prob delta)
           const whatIf = whatIfAnalysis?.perLevel?.[level.id] || null;
 
+          // Sweep→reaction tag (reversal / continuation / chop) for swept levels
+          const sweepReaction = sweepReactions[level.id] || null;
+
           return (
             <Rung
               key={level.id}
@@ -1660,6 +1683,7 @@ export default function LiquidityLadder() {
               blurEnabled={blurEnabled}
               whatIf={whatIf}
               comfortable={comfortable}
+              sweepReaction={sweepReaction}
             />
           );
         })}
