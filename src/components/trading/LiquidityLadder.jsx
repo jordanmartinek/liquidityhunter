@@ -19,7 +19,7 @@ import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity } from '@/lib/ladderExtras';
 import { ladderAudio } from '@/lib/ladderAudio';
 import { requestPermission as requestNotifyPermission, sendNotification } from '@/lib/notifications';
-import { alertZoneManager, fibZoneTracker } from '@/lib/bangerFeatures';
+import { alertZoneManager } from '@/lib/bangerFeatures';
 import { hasPatternManager } from '@/lib/headAndShoulders';
 import DailyRangeMeter from './DailyRangeMeter';
 import {
@@ -1354,21 +1354,6 @@ export default function LiquidityLadder() {
             )} />
             <span className="absolute left-1 top-0 text-[6px] text-amber-300/70 font-mono truncate max-w-[60px]">
               🔔 {zone.label}
-            </span>
-          </div>
-        );
-      })}
-
-      {/* Fib Auto-Zones — 0.705-0.886 retracement bands from displacements */}
-      {layers.zones && fibZoneTracker.getActiveZones().map(zone => {
-        const topPct = priceToPercent(zone.highPrice);
-        const botPct = priceToPercent(zone.lowPrice);
-        return (
-          <div key={zone.id} className="absolute left-12 right-12 pointer-events-none z-[3] rounded"
-            style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.max(Math.abs(botPct - topPct), 1.5)}%` }}>
-            <div className="w-full h-full bg-fuchsia-500/8 border border-fuchsia-500/25 rounded-sm" />
-            <span className="absolute right-1 top-0 text-[6px] text-fuchsia-300/70 font-mono">
-              Fib .705–.886
             </span>
           </div>
         );
