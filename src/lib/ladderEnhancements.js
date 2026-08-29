@@ -25,6 +25,41 @@
  */
 
 // ═══════════════════════════════════════════════════════════════
+// Throttled localStorage writer
+// ═══════════════════════════════════════════════════════════════
+// Some engines call _save() on every price tick (~1/sec), each doing a
+// synchronous JSON.stringify + localStorage write on the hot path. This
+// coalesces rapid writes to the same key and flushes at most once per
+// interval, with an immediate flush on tab hide/close so nothing is lost.
+const _pendingWrites = new Map(); // key -> latest string value
+let _flushTimer = null;
+const THROTTLE_MS = 2000;
+
+function _flushWrites() {
+  _flushTimer = null;
+  for (const [key, value] of _pendingWrites) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+  _pendingWrites.clear();
+}
+
+export function throttledSet(key, value) {
+  _pendingWrites.set(key, value);
+  if (_flushTimer === null) {
+    _flushTimer = setTimeout(_flushWrites, THROTTLE_MS);
+  }
+}
+
+// Flush immediately when the tab is hidden or unloaded so we never lose data.
+if (typeof window !== 'undefined' && !window.__lhThrottleFlushBound) {
+  window.__lhThrottleFlushBound = true;
+  const flushNow = () => { if (_pendingWrites.size) _flushWrites(); };
+  window.addEventListener('visibilitychange', () => { if (document.hidden) flushNow(); });
+  window.addEventListener('pagehide', flushNow);
+  window.addEventListener('beforeunload', flushNow);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // #6: SWING FAILURE PATTERN (SFP) DETECTOR
 // ═══════════════════════════════════════════════════════════════
 // SFP = price sweeps beyond a level then closes back inside it
@@ -151,7 +186,8 @@ export class OpeningRangeTracker {
   }
 
   _save() {
-    localStorage.setItem(OR_KEY, JSON.stringify(this.state));
+    // Throttled: OR state is written on every tick during the opening window.
+    throttledSet(OR_KEY, JSON.stringify(this.state));
   }
 
   addTick(price, time = Date.now()) {
@@ -678,12 +714,11 @@ export class TrailHistory {
   }
 
   _save() {
-    try {
-      localStorage.setItem(TRAIL_KEY, JSON.stringify({
-        date: new Date().toISOString().split('T')[0],
-        points: this.points.slice(-this.maxPoints),
-      }));
-    } catch {}
+    // Throttled to keep any per-tick save cheap (already batched every 50 pts).
+    throttledSet(TRAIL_KEY, JSON.stringify({
+      date: new Date().toISOString().split('T')[0],
+      points: this.points.slice(-this.maxPoints),
+    }));
   }
 
   addPoint(price) {
