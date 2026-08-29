@@ -82,7 +82,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled,
+  blurEnabled, whatIf,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -115,6 +115,7 @@ function Rung({
         isImminent && !isSwept && 'animate-pulse',
         isStalling && !isSwept && 'ring-2 ring-yellow-400/50 rounded',
         isDragTarget && 'ring-2 ring-teal-400/60 rounded',
+        whatIf?.wouldSweep && !isSwept && 'ring-2 ring-purple-400/70 rounded bg-purple-500/10',
       )}
       style={{
         top: `${percent}%`,
@@ -134,8 +135,17 @@ function Rung({
         )}>
           {distanceFromPrice > 0 ? '+' : ''}{distanceFromPrice.toFixed(0)}
         </span>
-        {/* Sweep probability badge */}
-        {sweepProb > 0 && !isSwept && (
+        {/* Sweep probability badge (What-If shows the hypothetical prob + delta) */}
+        {whatIf && !isSwept ? (
+          <span className="text-[7px] tabular-nums font-mono text-purple-300" title="What-If sweep probability">
+            {whatIf.newProb}%
+            {whatIf.delta !== 0 && (
+              <span className={whatIf.delta > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                {' '}{whatIf.delta > 0 ? '▲' : '▼'}{Math.abs(whatIf.delta)}
+              </span>
+            )}
+          </span>
+        ) : sweepProb > 0 && !isSwept && (
           <span className={cn('text-[7px] tabular-nums font-mono',
             sweepProb >= 70 ? 'text-emerald-400' :
             sweepProb >= 40 ? 'text-amber-400' :
@@ -602,6 +612,15 @@ export default function LiquidityLadder() {
     // Update the cursor crosshair (price readout) on every move
     updateCursor(e.clientY);
 
+    // What-If mode: track a hypothetical price under the cursor
+    if (whatIfActive) {
+      const res = clientYToPrice(e.clientY);
+      if (res && res.price > 0) {
+        whatIfMode.updatePrice(res.price);
+        setWhatIfPrice(res.price);
+      }
+    }
+
     // #12: Drag-to-edit handling
     if (dragEditLevel) {
       setDragEditY(e.clientY);
@@ -708,6 +727,22 @@ export default function LiquidityLadder() {
   // Reset view — recenter the ladder but keep the current zoom level
   const resetView = () => { setPanOffset(0); setXPan(0); };
 
+  // What-If mode: toggle a hypothetical-price preview. When enabling, seed the
+  // hypo price at the current price; moving the cursor then updates it.
+  const toggleWhatIf = useCallback(() => {
+    setWhatIfActive(prev => {
+      const next = !prev;
+      if (next) {
+        whatIfMode.activate(lastPrice > 0 ? lastPrice : null);
+        setWhatIfPrice(lastPrice > 0 ? lastPrice : null);
+      } else {
+        whatIfMode.deactivate();
+        setWhatIfPrice(null);
+      }
+      return next;
+    });
+  }, [lastPrice]);
+
   // Recenter on current price — snaps the ladder back so the live price sits
   // in the vertical center, WITHOUT changing the current zoom level.
   const recenterOnPrice = useCallback(() => {
@@ -741,6 +776,27 @@ export default function LiquidityLadder() {
 
   // #4: Magnet Zones
   const magnetZones = useMemo(() => calculateMagnetZones(filteredLevels), [filteredLevels]);
+
+  // ── What-If mode analysis ───────────────────────────────────────────
+  // For a hypothetical price, compute which active levels would be swept and
+  // how their sweep probabilities shift. Pure preview — never mutates data.
+  const whatIfAnalysis = useMemo(() => {
+    if (!whatIfActive || whatIfPrice == null || whatIfPrice <= 0) return null;
+    const active = filteredLevels.filter(l => l.sweep_status !== 'Swept');
+    let sweptAbove = 0, sweptBelow = 0;
+    const perLevel = {};
+    active.forEach(l => {
+      const isBSL = l.side === 'Buy-Side';
+      // BSL (buy-side liquidity, above) is taken when price rises to/through it;
+      // SSL (sell-side, below) is taken when price falls to/through it.
+      const wouldSweep = isBSL ? whatIfPrice >= l.price : whatIfPrice <= l.price;
+      if (wouldSweep) { isBSL ? sweptAbove++ : sweptBelow++; }
+      const newProb = calculateSweepProbability(l, whatIfPrice, drawDirection, timeAtLevel[l.id] || 0);
+      const curProb = calculateSweepProbability(l, lastPrice, drawDirection, timeAtLevel[l.id] || 0);
+      perLevel[l.id] = { wouldSweep, newProb, delta: newProb - curProb };
+    });
+    return { sweptAbove, sweptBelow, total: active.length, perLevel };
+  }, [whatIfActive, whatIfPrice, filteredLevels, drawDirection, timeAtLevel, lastPrice]);
 
   const allLevels = filteredLevels;
 
@@ -856,6 +912,20 @@ export default function LiquidityLadder() {
       {/* Liquidity Gradient Heatmap background */}
       <div className="absolute inset-0 pointer-events-none z-[1]"
         style={{ background: heatmapGradient }} />
+
+      {/* What-If summary panel */}
+      {whatIfActive && whatIfAnalysis && (
+        <div className="absolute top-8 left-1 z-40 bg-purple-950/90 border border-purple-500/50 rounded-md px-2 py-1.5 pointer-events-none max-w-[150px]">
+          <div className="text-[9px] font-bold text-purple-200 mb-0.5">🔮 What-If preview</div>
+          <div className="text-[8px] text-purple-100/90 leading-relaxed">
+            @ <span className="font-mono font-bold">{whatIfPrice ? whatIfPrice.toFixed(2) : '—'}</span>
+          </div>
+          <div className="text-[8px] text-cyan-300">▲ {whatIfAnalysis.sweptAbove} BSL swept</div>
+          <div className="text-[8px] text-orange-300">▼ {whatIfAnalysis.sweptBelow} SSL swept</div>
+          <div className="text-[7px] text-purple-300/70 mt-0.5">{whatIfAnalysis.total} active levels</div>
+        </div>
+      )}
+
       {/* Zoom controls */}
       <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1">
         <button onClick={() => setZoom(prev => Math.min(15, prev + 0.3))}
@@ -906,6 +976,20 @@ export default function LiquidityLadder() {
           )}
         >
           {snapEnabled ? '🧲 snap' : '🧲 off'}
+        </button>
+        <button
+          onClick={toggleWhatIf}
+          title={whatIfActive
+            ? 'What-If mode ON — move the cursor to preview which levels would be swept (no data is changed). Click to exit.'
+            : 'What-If mode — preview which levels a hypothetical price would sweep'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            whatIfActive
+              ? 'bg-purple-500/25 border-purple-400/60 text-purple-200'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          🔮 What-If
         </button>
       </div>
 
@@ -1202,6 +1286,9 @@ export default function LiquidityLadder() {
           // #6: SFP check
           const hasSFP = sfpDetections.some(s => s.levelId === level.id);
 
+          // What-If preview for this level (would-sweep + prob delta)
+          const whatIf = whatIfAnalysis?.perLevel?.[level.id] || null;
+
           return (
             <Rung
               key={level.id}
@@ -1224,6 +1311,7 @@ export default function LiquidityLadder() {
               hasSFP={hasSFP}
               onContextMenu={handleRungContextMenu}
               blurEnabled={blurEnabled}
+              whatIf={whatIf}
             />
           );
         })}
@@ -1287,6 +1375,17 @@ export default function LiquidityLadder() {
         {/* Price Marker */}
         {priceMarkerPercent !== null && (
           <PriceMarker percent={priceMarkerPercent} price={lastPrice} />
+        )}
+
+        {/* What-If hypothetical price marker */}
+        {whatIfActive && whatIfPrice > 0 && (
+          <div className="absolute left-0 right-0 flex items-center z-[85] pointer-events-none"
+            style={{ top: `${priceToPercent(whatIfPrice)}%`, transform: 'translateY(-50%)' }}>
+            <div className="flex-1 h-px bg-purple-400/70 border-t border-dashed border-purple-400/80" />
+            <span className="text-[10px] text-purple-100 font-mono font-bold ml-1 whitespace-nowrap bg-purple-900/90 px-1.5 py-0.5 rounded border border-purple-400/60">
+              🔮 {whatIfPrice.toFixed(2)}
+            </span>
+          </div>
         )}
       </div>
 
