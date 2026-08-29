@@ -337,7 +337,7 @@ export default function LiquidityLadder() {
   const {
     getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive,
     displacements, watchingLevels, updateLevel, sessionLevelsState,
-    addLevel, removeLevel,
+    addLevel, removeLevel, priceStale, updateLastPrice,
   } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
@@ -458,6 +458,32 @@ export default function LiquidityLadder() {
     try { if (soundOn) { ladderAudio.init(); ladderAudio.entryBell?.(); } } catch {}
     try { if (notifyOnRef.current) sendNotification('🔔 Liquidity Hunter', 'Test alert — alerts are working.', 'lh_test'); } catch {}
   }, [soundOn]);
+
+  // Simulation mode: when there's no live price feed, generate a gentle
+  // random-walk price so the ladder is usable for demos/testing. Never runs
+  // while a real feed is live, so it can't interfere with actual data.
+  const [simOn, setSimOn] = useState(false);
+  const simPriceRef = useRef(0);
+  useEffect(() => {
+    if (!simOn || isLive) return; // stand down whenever real data is live
+    // Seed from the current price, or a sensible default, or the mid of levels.
+    let seed = lastPrice > 0 ? lastPrice : 0;
+    if (seed <= 0 && filteredLevels.length) {
+      const ps = filteredLevels.map(l => l.price).filter(p => p > 0);
+      if (ps.length) seed = (Math.max(...ps) + Math.min(...ps)) / 2;
+    }
+    if (seed <= 0) seed = 100;
+    simPriceRef.current = seed;
+    const stepMax = Math.max(seed * 0.0004, 0.25); // ~0.04% wiggle per tick
+    const id = setInterval(() => {
+      const drift = (Math.random() - 0.5) * 2 * stepMax;
+      simPriceRef.current = Math.max(0.01, simPriceRef.current + drift);
+      updateLastPrice(parseFloat(simPriceRef.current.toFixed(2)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [simOn, isLive, updateLastPrice]);
+  // Auto-disable the sim if a real feed comes online.
+  useEffect(() => { if (isLive && simOn) setSimOn(false); }, [isLive, simOn]);
 
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
@@ -1043,6 +1069,27 @@ export default function LiquidityLadder() {
       {layers.heatmap && (
         <div className="absolute inset-0 pointer-events-none z-[1]"
           style={{ background: heatmapGradient }} />
+      )}
+
+      {/* Live-status banner: shows when the price feed is not live or is stale */}
+      {(!isLive || priceStale) && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-slate-900/90 border border-amber-500/40 rounded-full px-2.5 py-1 pointer-events-auto"
+          onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+          <span className="text-[9px] text-amber-300 font-medium whitespace-nowrap">
+            {simOn ? '▶ Simulation' : priceStale ? '⚠ Price stale' : '○ Not live'}
+          </span>
+          {!isLive && (
+            <button
+              onClick={() => setSimOn(s => !s)}
+              className={cn('text-[8px] px-1.5 py-0.5 rounded-full border transition-colors',
+                simOn
+                  ? 'bg-teal-500/25 border-teal-400/60 text-teal-200'
+                  : 'bg-slate-700/60 border-slate-500/50 text-slate-200 hover:bg-slate-600/60'
+              )}>
+              {simOn ? 'Stop sim' : 'Start sim'}
+            </button>
+          )}
+        </div>
       )}
 
       {/* What-If summary panel */}
