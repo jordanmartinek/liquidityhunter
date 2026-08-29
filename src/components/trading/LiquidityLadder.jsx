@@ -384,6 +384,40 @@ export default function LiquidityLadder() {
   const drawDirectionRef = useRef(drawDirection);
   const stallsRef = useRef(stalls);
 
+  // ── Single source of truth for the price↔percent transform ──────────
+  // The positions memo publishes {paddedMax,totalRange,zoom,panOffset} into
+  // this ref (assignment lives after the memo). These helpers read it at
+  // call-time, so they are STABLE (empty deps) and every call site —
+  // positions, price line, trail, quick-add, drag-edit, recenter, crosshair —
+  // uses identical math instead of re-deriving the padded range.
+  const transformRef = useRef({ paddedMax: 0, totalRange: 1, zoom: 1, panOffset: 0 });
+
+  // Price → view-percent (0–100 top-to-bottom, after zoom/pan)
+  const priceToPercent = useCallback((price) => {
+    const { paddedMax, totalRange, zoom, panOffset } = transformRef.current;
+    if (totalRange === 0) return 50;
+    const pct = ((paddedMax - price) / totalRange) * 100;
+    const center = 50 + panOffset;
+    return (pct - center) * zoom + 50;
+  }, []);
+
+  // View-percent → price (exact inverse of priceToPercent)
+  const percentToPrice = useCallback((viewPct) => {
+    const { paddedMax, totalRange, zoom, panOffset } = transformRef.current;
+    if (totalRange === 0) return 0;
+    const center = 50 + panOffset;
+    const rawPct = (viewPct - 50) / zoom + center;
+    return paddedMax - (rawPct / 100) * totalRange;
+  }, []);
+
+  // clientY (px) → { pct, price } via the container's current bounds
+  const clientYToPrice = useCallback((clientY) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.height === 0) return null;
+    const pct = ((clientY - rect.top) / rect.height) * 100;
+    return { pct, price: percentToPrice(pct) };
+  }, [percentToPrice]);
+
   // Keep the live refs current so the per-tick effect never reads stale values.
   useEffect(() => { filteredLevelsRef.current = filteredLevels; }, [filteredLevels]);
   useEffect(() => { drawDirectionRef.current = drawDirection; }, [drawDirection]);
@@ -522,23 +556,9 @@ export default function LiquidityLadder() {
     if (dragEditLevel && dragEditY !== null) {
       const containerRect = containerRef.current?.getBoundingClientRect();
       if (containerRect) {
-        const relativeY = (dragEditY - containerRect.top) / containerRect.height;
-        // Convert Y position back to price
-        const allPrices = filteredLevels.map(l => l.price);
-        if (lastPrice > 0) allPrices.push(lastPrice);
-        const maxP = Math.max(...allPrices);
-        const minP = Math.min(...allPrices);
-        const rawRange = maxP - minP;
-        const padding = Math.max(rawRange * 0.12, 5);
-        const paddedMax = maxP + padding;
-        const paddedMin = minP - padding;
-        const totalRange = paddedMax - paddedMin;
-
-        // Reverse the transform: viewPct → rawPct → price
-        const viewPct = relativeY * 100;
-        const center = 50 + panOffset;
-        const rawPct = (viewPct - 50) / zoom + center;
-        const newPrice = paddedMax - (rawPct / 100) * totalRange;
+        const viewPct = ((dragEditY - containerRect.top) / containerRect.height) * 100;
+        // Reverse the shared transform: viewPct → price
+        const newPrice = percentToPrice(viewPct);
 
         // Only update if price is reasonable
         if (newPrice > 0 && Math.abs(newPrice - dragEditLevel.price) > 0.5) {
@@ -561,24 +581,9 @@ export default function LiquidityLadder() {
 
   // #21: Quick-add level (double-click on ladder)
   const handleDoubleClick = useCallback((e) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const relativeY = (e.clientY - rect.top) / rect.height;
-    // Convert Y to price using reverse transform
-    const allPrices = filteredLevels.map(l => l.price);
-    if (lastPrice > 0) allPrices.push(lastPrice);
-    if (allPrices.length === 0) return;
-    const maxP = Math.max(...allPrices);
-    const minP = Math.min(...allPrices);
-    const rawRange = maxP - minP;
-    const padding = Math.max(rawRange * 0.12, 5);
-    const pMax = maxP + padding;
-    const pMin = minP - padding;
-    const tRange = pMax - pMin;
-    const viewPct = relativeY * 100;
-    const center = 50 + panOffset;
-    const rawPct = (viewPct - 50) / zoom + center;
-    const price = pMax - (rawPct / 100) * tRange;
+    const res = clientYToPrice(e.clientY);
+    if (!res) return;
+    const price = res.price;
     if (price > 0) {
       const name = prompt(`Quick-add level at ${price.toFixed(2)}\nEnter name (or cancel):`);
       if (name !== null) {
@@ -586,7 +591,7 @@ export default function LiquidityLadder() {
         addLevel({ price: parseFloat(price.toFixed(2)), name: name || `Level ${price.toFixed(0)}`, side, pool_type: 'Custom', timeframe: '1H', strength: 3, sweep_status: 'Untouched' });
       }
     }
-  }, [filteredLevels, lastPrice, zoom, panOffset]);
+  }, [clientYToPrice, lastPrice, addLevel]);
 
   // #22: Right-click context menu on rungs
   const handleRungContextMenu = useCallback((e, level) => {
@@ -627,26 +632,18 @@ export default function LiquidityLadder() {
   // Recenter on current price — snaps the ladder back so the live price sits
   // in the vertical center, WITHOUT changing the current zoom level.
   const recenterOnPrice = useCallback(() => {
-    if (lastPrice <= 0 || filteredLevels.length === 0) {
+    const { paddedMax, totalRange } = transformRef.current;
+    if (lastPrice <= 0 || totalRange <= 0) {
       // No price to anchor to — just reset pan
       setPanOffset(0);
       return;
     }
-    const allPrices = filteredLevels.map(l => l.price);
-    allPrices.push(lastPrice);
-    const maxP = Math.max(...allPrices);
-    const minP = Math.min(...allPrices);
-    const rawRange = maxP - minP;
-    const padding = Math.max(rawRange * 0.12, 5);
-    const pMax = maxP + padding;
-    const pMin = minP - padding;
-    const tRange = pMax - pMin;
-    // Raw (untransformed) percent position of the price
-    const rawPct = ((pMax - lastPrice) / tRange) * 100;
+    // Raw (untransformed) percent position of the price.
+    const rawPct = ((paddedMax - lastPrice) / totalRange) * 100;
     // Transformed position is (rawPct - (50 + panOffset)) * zoom + 50.
-    // Setting panOffset = rawPct - 50 makes the transformed position land at 50 (center).
+    // Setting panOffset = rawPct - 50 lands the price at 50 (vertical center).
     setPanOffset(rawPct - 50);
-  }, [lastPrice, filteredLevels]);
+  }, [lastPrice]);
 
   // Detect confluence (levels within 15 pts of each other)
   const confluenceLevels = useMemo(() => {
@@ -720,31 +717,16 @@ export default function LiquidityLadder() {
     };
   }, [allLevels, lastPrice, priceTrail, zoom, panOffset, priceLine]);
 
-  // Price-to-percent helper (for zones/bands)
-  const priceToPercent = useCallback((price) => {
-    if (totalRange === 0) return 50;
-    const pct = ((paddedMax - price) / totalRange) * 100;
-    const center = 50 + panOffset;
-    return (pct - center) * zoom + 50;
-  }, [paddedMax, totalRange, zoom, panOffset]);
-
-  // Percent-to-price helper (inverse of priceToPercent) — used by the cursor crosshair
-  const percentToPrice = useCallback((viewPct) => {
-    if (totalRange === 0) return 0;
-    const center = 50 + panOffset;
-    const rawPct = (viewPct - 50) / zoom + center;
-    return paddedMax - (rawPct / 100) * totalRange;
-  }, [paddedMax, totalRange, zoom, panOffset]);
+  // Publish the latest transform inputs to the ref (helpers declared near the
+  // top read this at call-time). Assigned here, after the positions memo.
+  transformRef.current = { paddedMax, totalRange, zoom, panOffset };
 
   // Update the cursor crosshair from a clientY coordinate
   const updateCursor = useCallback((clientY) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect || rect.height === 0) return;
-    const pct = ((clientY - rect.top) / rect.height) * 100;
-    if (pct < 0 || pct > 100) { setCursor(null); return; }
-    const price = percentToPrice(pct);
-    setCursor({ pct, price });
-  }, [percentToPrice]);
+    const res = clientYToPrice(clientY);
+    if (!res || res.pct < 0 || res.pct > 100) { setCursor(null); return; }
+    setCursor(res);
+  }, [clientYToPrice]);
 
   const handleMouseLeave = (e) => {
     setCursor(null);
@@ -1035,27 +1017,13 @@ export default function LiquidityLadder() {
               const timeMax = Math.max(...times);
               const timeRange = timeMax - timeMin || 1;
 
-              const allPrices = [...allLevels.map(l => l.price)];
-              if (lastPrice > 0) allPrices.push(lastPrice);
-              const maxP = Math.max(...allPrices);
-              const minP = Math.min(...allPrices);
-              const rawRange = maxP - minP;
-              const padding = Math.max(rawRange * 0.12, 5);
-              const pMax = maxP + padding;
-              const tRange = pMax - (minP - padding);
-
-              const priceToY = (price) => {
-                let pct = ((pMax - price) / tRange) * 100;
-                const center = 50 + panOffset;
-                return (pct - center) * zoom + 50;
-              };
-
               // Horizontal pan: compress the plot into [0, plotWidth] so xPan% is
               // left empty on the right, making the price end point easy to read.
               const plotWidth = Math.max(20, 100 - xPan);
+              // Y uses the shared transform (single source of truth).
               const points = priceLine.map(p => ({
                 x: ((p.time - timeMin) / timeRange) * plotWidth,
-                y: priceToY(p.price),
+                y: priceToPercent(p.price),
               }));
 
               if (points.length < 2) return null;
@@ -1284,24 +1252,12 @@ export default function LiquidityLadder() {
       {trailPoints.length > 10 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-[2] opacity-20" viewBox="0 0 100 100" preserveAspectRatio="none">
           {(() => {
-            const allPrices = [...filteredLevels.map(l => l.price)];
-            if (lastPrice > 0) allPrices.push(lastPrice);
-            if (allPrices.length === 0) return null;
-            const maxP = Math.max(...allPrices);
-            const minP = Math.min(...allPrices);
-            const rawRange = maxP - minP;
-            const padding = Math.max(rawRange * 0.12, 5);
-            const pMax = maxP + padding;
-            const tRange = pMax - (minP - padding);
-
             const step = Math.max(1, Math.floor(trailPoints.length / 200));
             const sampled = trailPoints.filter((_, i) => i % step === 0);
+            // Y uses the shared transform (single source of truth).
             const points = sampled.map((p, i) => {
               const x = (i / (sampled.length - 1)) * 100;
-              let pct = ((pMax - p) / tRange) * 100;
-              const center = 50 + panOffset;
-              const y = (pct - center) * zoom + 50;
-              return { x, y };
+              return { x, y: priceToPercent(p) };
             });
 
             if (points.length < 2) return null;
