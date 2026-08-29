@@ -1831,14 +1831,27 @@ export default function LiquidityLadder() {
             {/* Vertical span band */}
             <div className="absolute left-1/2 -translate-x-1/2 w-16 bg-cyan-400/10 border-x border-cyan-400/30"
               style={{ top: `${top}%`, height: `${height}%` }} />
-            {/* Delta readout at the current point */}
-            <div className="absolute left-1/2 -translate-x-1/2" style={{ top: `${bPct}%`, transform: 'translate(-50%, -50%)' }}>
-              <div className={cn('text-[10px] font-mono font-bold whitespace-nowrap px-1.5 py-0.5 rounded border shadow-sm',
-                up ? 'text-emerald-100 bg-emerald-900/90 border-emerald-500/60'
-                   : 'text-red-100 bg-red-900/90 border-red-500/60')}>
-                {up ? '▲' : '▼'} {Math.abs(deltaPts).toFixed(2)} pts · {Math.abs(pctChange).toFixed(2)}%
-              </div>
-            </div>
+            {/* Delta readout — kept inside the ladder so it never clips at the edges.
+                Clamp the vertical position and flip the label below/above the line
+                depending on whether we are near the top or bottom. */}
+            {(() => {
+              const clampedTop = Math.max(4, Math.min(96, bPct));
+              const nearTop = clampedTop < 12;
+              return (
+                <div className="absolute left-1/2 z-[96]"
+                  style={{
+                    top: `${clampedTop}%`,
+                    // near the top: drop the label just below the line; otherwise sit it above the line
+                    transform: nearTop ? 'translate(-50%, 4px)' : 'translate(-50%, calc(-100% - 4px))',
+                  }}>
+                  <div className={cn('text-[10px] font-mono font-bold whitespace-nowrap px-1.5 py-0.5 rounded border shadow-sm',
+                    up ? 'text-emerald-100 bg-emerald-900/90 border-emerald-500/60'
+                       : 'text-red-100 bg-red-900/90 border-red-500/60')}>
+                    {up ? '▲' : '▼'} {Math.abs(deltaPts).toFixed(2)} pts · {Math.abs(pctChange).toFixed(2)}%
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
