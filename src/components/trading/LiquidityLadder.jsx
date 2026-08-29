@@ -16,7 +16,7 @@ import {
 } from '@/lib/ladderAnalytics';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
-import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity } from '@/lib/ladderExtras';
+import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity, calculateETAs } from '@/lib/ladderExtras';
 import { ladderAudio } from '@/lib/ladderAudio';
 import { requestPermission as requestNotifyPermission, sendNotification } from '@/lib/notifications';
 import { alertZoneManager } from '@/lib/bangerFeatures';
@@ -1029,6 +1029,23 @@ export default function LiquidityLadder() {
     return { sweptAbove, sweptBelow, total: active.length, perLevel };
   }, [whatIfActive, whatIfPrice, filteredLevels, drawDirection, timeAtLevel, lastPrice]);
 
+  // ── Liquidity runway ────────────────────────────────────────────────
+  // While price is moving with a clear displacement, point to the next
+  // unswept pool in that direction and estimate an ETA from velocity.
+  const runway = useMemo(() => {
+    if (lastPrice <= 0 || !velocity || velocity.speed < 0.1 || velocity.direction === 0) return null;
+    // Require a live displacement so this only shows during real moves.
+    const hasActiveDisplacement = displacements?.some(d => d.isActive);
+    if (!hasActiveDisplacement) return null;
+    const etas = calculateETAs(filteredLevels, lastPrice, velocity);
+    if (!etas.length) return null;
+    const target = etas[0]; // nearest pool in the direction of movement
+    return {
+      ...target,
+      up: velocity.direction > 0,
+    };
+  }, [lastPrice, velocity, filteredLevels, displacements]);
+
   const allLevels = filteredLevels;
 
   // Compute positions — PURE proportional
@@ -1687,6 +1704,31 @@ export default function LiquidityLadder() {
             />
           );
         })}
+
+        {/* Liquidity runway — projection from price to the next pool in the move direction */}
+        {effectiveLayers.patterns && runway && priceMarkerPercent !== null && (() => {
+          const targetPct = priceToPercent(runway.levelPrice);
+          const top = Math.min(priceMarkerPercent, targetPct);
+          const height = Math.abs(targetPct - priceMarkerPercent);
+          const color = runway.up ? 'rgba(16,185,129,0.55)' : 'rgba(239,68,68,0.55)';
+          return (
+            <>
+              {/* Dashed vertical runway from current price to the target pool */}
+              <div className="absolute left-1/2 -translate-x-1/2 z-[7] pointer-events-none"
+                style={{ top: `${top}%`, height: `${height}%`, borderLeft: `1.5px dashed ${color}` }} />
+              {/* ETA + target label at the pool */}
+              <div className="absolute left-1/2 -translate-x-1/2 z-[8] pointer-events-none"
+                style={{ top: `${targetPct}%`, transform: 'translate(-50%, -50%)' }}>
+                <span className={cn('text-[9px] font-mono font-bold whitespace-nowrap px-1.5 py-0.5 rounded border shadow-sm',
+                  runway.up
+                    ? 'text-emerald-100 bg-emerald-900/85 border-emerald-500/50'
+                    : 'text-red-100 bg-red-900/85 border-red-500/50')}>
+                  {runway.up ? '▲' : '▼'} {runway.levelName} · ~{runway.etaDisplay}
+                </span>
+              </div>
+            </>
+          );
+        })()}
 
         {/* AVWAP Lines from active displacements */}
         {effectiveLayers.patterns && displacements && displacements.filter(d => d.isActive && d.avwapValue).map(disp => {
