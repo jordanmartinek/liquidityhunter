@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import TopBar from '@/components/trading/TopBar';
 import BottomBar from '@/components/trading/BottomBar';
 import TradingViewChart from '@/components/trading/TradingViewChart';
@@ -21,12 +21,44 @@ import GamePlanPanel from '@/components/trading/GamePlanPanel';
 import WeeklyHeatmap from '@/components/trading/WeeklyHeatmap';
 import AlertZonesPanel from '@/components/trading/AlertZonesPanel';
 import GamificationPanel from '@/components/trading/GamificationPanel';
+import CollapsibleSection from '@/components/trading/CollapsibleSection';
 import { cn } from '@/lib/utils';
+
+// Default open/closed state for the right-rail Analysis sections.
+// High-priority sections start expanded; the rest are collapsed to declutter.
+const DEFAULT_SECTIONS = {
+  intelligence: false,
+  displacement: true,
+  sessionLevels: true,
+  draw: false,
+  bias: false,
+  avwap: false,
+  gamePlan: false,
+  ghost: false,
+  alertZones: true,
+  weekly: false,
+  gamification: false,
+  notes: true,
+};
 
 export default function ResearchCockpit() {
   const [centerView, setCenterView] = useState('chart'); // 'chart' | 'ladder'
   const [rightPanel, setRightPanel] = useState('analysis'); // 'analysis' | 'trading' | 'paper'
   const [ladderFullscreen, setLadderFullscreen] = useState(false); // fullscreen ladder mode
+
+  // Collapsible right-rail sections — persisted so your layout sticks.
+  const [sections, setSections] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('lh_ui_sections') || '{}');
+      return { ...DEFAULT_SECTIONS, ...saved };
+    } catch { return DEFAULT_SECTIONS; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ui_sections', JSON.stringify(sections)); } catch {}
+  }, [sections]);
+  const toggleSection = useCallback((id) => {
+    setSections(prev => ({ ...prev, [id]: !prev[id] }));
+  }, []);
 
   // Fullscreen ladder — takes over the entire viewport
   if (ladderFullscreen) {
@@ -176,65 +208,67 @@ export default function ResearchCockpit() {
           <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
             {rightPanel === 'analysis' ? (
               <div className="space-y-0">
-                {/* Live Intelligence (compact) */}
-                <div className="p-2 border-b border-terminal-border">
+                <CollapsibleSection id="intelligence" title="Live Intelligence" icon="🧠" accent="text-cyan-400"
+                  open={sections.intelligence} onToggle={toggleSection} bodyClassName="p-2">
                   <LiveIntelligence />
-                </div>
+                </CollapsibleSection>
 
-                {/* Displacement Detector + Auto AVWAP */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="displacement" title="Displacement Detector" icon="⚡" accent="text-amber-400"
+                  open={sections.displacement} onToggle={toggleSection}>
                   <DisplacementPanel />
-                </div>
+                </CollapsibleSection>
 
-                {/* Session Levels (Auto Asia/London H/L) */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="sessionLevels" title="Session Levels" icon="🌏" accent="text-blue-400"
+                  open={sections.sessionLevels} onToggle={toggleSection}>
                   <SessionLevelsToggle />
-                </div>
+                </CollapsibleSection>
 
-                {/* Draw Indicator */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="draw" title="Draw Indicator" icon="🎯" accent="text-slate-300"
+                  open={sections.draw} onToggle={toggleSection}>
                   <DrawIndicator />
-                </div>
+                </CollapsibleSection>
 
-                {/* Bias Scanner */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="bias" title="HTF Bias" icon="🧭" accent="text-slate-300"
+                  open={sections.bias} onToggle={toggleSection}>
                   <BiasScanner />
-                </div>
+                </CollapsibleSection>
 
-                {/* AVWAP Plans */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="avwap" title="AVWAP Plans" icon="📉" accent="text-purple-400"
+                  open={sections.avwap} onToggle={toggleSection}>
                   <AVWAPPlanner />
-                </div>
+                </CollapsibleSection>
 
-                {/* Game Plan */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="gamePlan" title="Game Plan" icon="📋" accent="text-emerald-400"
+                  open={sections.gamePlan} onToggle={toggleSection}>
                   <GamePlanPanel />
-                </div>
+                </CollapsibleSection>
 
-                {/* Ghost Trader */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="ghost" title="Ghost Trader" icon="👻" accent="text-slate-300"
+                  open={sections.ghost} onToggle={toggleSection}>
                   <GhostTraderPanel />
-                </div>
+                </CollapsibleSection>
 
-                {/* Alert Zones */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="alertZones" title="Alert Zones" icon="🔔" accent="text-amber-300"
+                  open={sections.alertZones} onToggle={toggleSection}>
                   <AlertZonesPanel />
-                </div>
+                </CollapsibleSection>
 
-                {/* Weekly Performance */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="weekly" title="Weekly Performance" icon="📊" accent="text-slate-300"
+                  open={sections.weekly} onToggle={toggleSection}>
                   <WeeklyHeatmap />
-                </div>
+                </CollapsibleSection>
 
-                {/* Gamification (Achievements, Challenges, Streak, Events, Webhook) */}
-                <div className="p-3 border-b border-terminal-border">
+                <CollapsibleSection id="gamification" title="Achievements & Streaks" icon="🏆" accent="text-yellow-400"
+                  open={sections.gamification} onToggle={toggleSection}>
                   <GamificationPanel />
-                </div>
+                </CollapsibleSection>
 
-                {/* Session Notes */}
-                <div className="flex-1 min-h-[200px]">
-                  <SessionNotes />
-                </div>
+                <CollapsibleSection id="notes" title="Session Notes" icon="📝" accent="text-slate-300"
+                  open={sections.notes} onToggle={toggleSection} bodyClassName="p-0">
+                  <div className="min-h-[200px]">
+                    <SessionNotes />
+                  </div>
+                </CollapsibleSection>
               </div>
             ) : rightPanel === 'trading' ? (
               <TradingPanel />
