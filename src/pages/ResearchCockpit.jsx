@@ -60,6 +60,24 @@ export default function ResearchCockpit() {
     setSections(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
+  // Panel density — scales the left/right rails so you can dial the whole
+  // app's text/spacing up or down from one control. Persisted.
+  const DENSITY_SCALE = { compact: 0.85, normal: 1, comfortable: 1.15 };
+  const DENSITY_ORDER = ['compact', 'normal', 'comfortable'];
+  const [density, setDensity] = useState(() => {
+    try {
+      const d = localStorage.getItem('lh_ui_density');
+      return DENSITY_SCALE[d] ? d : 'normal';
+    } catch { return 'normal'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ui_density', density); } catch {}
+  }, [density]);
+  const cycleDensity = useCallback(() => {
+    setDensity(prev => DENSITY_ORDER[(DENSITY_ORDER.indexOf(prev) + 1) % DENSITY_ORDER.length]);
+  }, []);
+  const railZoom = DENSITY_SCALE[density] || 1;
+
   // Fullscreen ladder — takes over the entire viewport
   if (ladderFullscreen) {
     return (
@@ -104,7 +122,8 @@ export default function ResearchCockpit() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row md:min-h-0 overflow-y-auto md:overflow-hidden">
         {/* LEFT RAIL — Level List, Fib Calculator */}
-        <div className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto">
+        <div className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto"
+          style={{ zoom: railZoom }}>
           <div className="flex-1 md:min-h-0">
             <LiquidityLevelList />
           </div>
@@ -202,10 +221,19 @@ export default function ResearchCockpit() {
             >
               📝 Paper
             </button>
+            {/* Density control — cycles compact / normal / comfortable */}
+            <button
+              onClick={cycleDensity}
+              title={`Text size: ${density} (click to change)`}
+              aria-label={`Panel text size: ${density}. Click to change.`}
+              className="shrink-0 px-2 py-2 text-[11px] text-slate-500 hover:text-slate-200 border-l border-terminal-border"
+            >
+              {density === 'compact' ? 'A⁻' : density === 'comfortable' ? 'A⁺' : 'A'}
+            </button>
           </div>
 
           {/* Right Panel Content */}
-          <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col overflow-y-auto" style={{ zoom: railZoom }}>
             {rightPanel === 'analysis' ? (
               <div className="space-y-0">
                 <CollapsibleSection id="intelligence" title="Live Intelligence" icon="🧠" accent="text-cyan-400"
