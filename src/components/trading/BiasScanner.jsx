@@ -166,8 +166,7 @@ export default function BiasScanner() {
   return (
     <div className="space-y-2">
       {/* HTF Pattern Selector */}
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">HTF Bias</span>
+      <div className="flex items-center justify-end">
         <button onClick={() => setShowPatterns(!showPatterns)}
           className="text-[9px] text-slate-500 hover:text-slate-300">
           {showPatterns ? 'Close' : 'Select Pattern'}

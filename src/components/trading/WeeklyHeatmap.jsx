@@ -32,8 +32,7 @@ export default function WeeklyHeatmap() {
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider font-medium text-teal-400">📊 Performance</span>
+      <div className="flex items-center justify-end">
         <span className="text-[7px] text-slate-600">Last 4 weeks</span>
       </div>
 

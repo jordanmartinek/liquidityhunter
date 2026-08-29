@@ -55,8 +55,7 @@ export default function AVWAPPlanner() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">AVWAP Plans</span>
-          {plans.length > 0 && <span className="text-[9px] text-zinc-600">({plans.length})</span>}
+          {plans.length > 0 && <span className="text-[9px] text-zinc-600">{plans.length} plan{plans.length > 1 ? 's' : ''}</span>}
         </div>
         <button onClick={() => setShowAdd(!showAdd)} className="text-[10px] text-teal-400 hover:text-teal-300">
           {showAdd ? 'Cancel' : '+ Plan'}

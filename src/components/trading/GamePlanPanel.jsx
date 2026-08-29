@@ -16,10 +16,11 @@ export default function GamePlanPanel() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider font-medium text-amber-400">🎯 Game Plan</span>
-        <span className="text-[8px] text-slate-600">{plan.summary}</span>
-      </div>
+      {plan.summary && (
+        <div className="flex items-center justify-end">
+          <span className="text-[8px] text-slate-600">{plan.summary}</span>
+        </div>
+      )}
 
       {/* Primary Target */}
       {plan.primary && (

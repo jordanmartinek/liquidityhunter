@@ -75,8 +75,7 @@ export default function GamificationPanel() {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 group">
-          <span className="text-[10px] text-slate-600 group-hover:text-slate-400">{expanded ? '▼' : '▶'}</span>
-          <span className="text-[10px] uppercase tracking-wider font-medium text-amber-400">🏆 Gamification</span>
+          <span className="text-[9px] text-slate-600 group-hover:text-slate-400">{expanded ? '▼ details' : '▶ details'}</span>
         </button>
         <div className="flex items-center gap-2">
           {/* Streak badge */}
