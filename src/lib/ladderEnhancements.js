@@ -737,3 +737,89 @@ export class TrailHistory {
 }
 
 export const trailHistory = new TrailHistory();
+
+
+
+// ═══════════════════════════════════════════════════════════════
+// SWEEP → REACTION TAGGING
+// ═══════════════════════════════════════════════════════════════
+// After a level flips to "Swept", watch the following ticks and classify how
+// price reacted:
+//   • reversal     — price pushed back THROUGH the level (rejection of the sweep)
+//   • continuation — price kept going BEYOND the level (real break)
+//   • chop         — neither threshold met within the window (indecision)
+// Produces a small tag per level so, over a session, you can see which of your
+// levels actually produce reactions.
+
+const REACTION_WINDOW_MS = 3 * 60 * 1000; // watch up to 3 min after the sweep
+const REACTION_MIN_TICKS = 6;             // need a few ticks before deciding
+
+export class SweepReactionTracker {
+  constructor() {
+    this.watches = {};   // levelId -> { levelPrice, isBSL, sweepPrice, startTime, ticks, extremeBeyond, extremeBack }
+    this.reactions = {}; // levelId -> { status, movePts, atTime }
+  }
+
+  // Feed every tick with the current levels (any status) and the live price.
+  update(levels, price) {
+    if (!levels || price <= 0) return;
+    const now = Date.now();
+
+    for (const level of levels) {
+      if (level.sweep_status !== 'Swept') continue;
+      const id = level.id;
+      // Already classified — leave it.
+      if (this.reactions[id]) continue;
+
+      const isBSL = level.side === 'Buy-Side';
+      // Start a watch the first time we see this level swept.
+      if (!this.watches[id]) {
+        this.watches[id] = {
+          levelPrice: level.price,
+          isBSL,
+          sweepPrice: price,
+          startTime: now,
+          ticks: 0,
+          extremeBeyond: 0, // furthest price traveled beyond the level (in sweep direction)
+          extremeBack: 0,   // furthest price retraced back through the level
+        };
+      }
+
+      const w = this.watches[id];
+      w.ticks++;
+      // Beyond = continuing in the sweep direction (BSL swept => up; SSL => down)
+      const beyond = isBSL ? (price - level.price) : (level.price - price);
+      // Back = returning through the level the other way
+      const back = isBSL ? (level.price - price) : (price - level.price);
+      if (beyond > w.extremeBeyond) w.extremeBeyond = beyond;
+      if (back > w.extremeBack) w.extremeBack = back;
+
+      // Threshold scales with the level's price so it works on any instrument.
+      const threshold = Math.max(level.price * 0.0008, 1);
+
+      let status = null;
+      if (w.extremeBack >= threshold && w.extremeBack > w.extremeBeyond) {
+        status = 'reversal';
+      } else if (w.extremeBeyond >= threshold * 1.5) {
+        status = 'continuation';
+      } else if (now - w.startTime > REACTION_WINDOW_MS && w.ticks >= REACTION_MIN_TICKS) {
+        status = 'chop';
+      }
+
+      if (status) {
+        this.reactions[id] = {
+          status,
+          movePts: parseFloat((status === 'reversal' ? w.extremeBack : w.extremeBeyond).toFixed(2)),
+          atTime: now,
+        };
+        delete this.watches[id];
+      }
+    }
+  }
+
+  getReaction(levelId) { return this.reactions[levelId] || null; }
+  getAll() { return { ...this.reactions }; }
+  clear() { this.watches = {}; this.reactions = {}; }
+}
+
+export const sweepReactionTracker = new SweepReactionTracker();
