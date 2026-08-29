@@ -82,7 +82,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf,
+  blurEnabled, whatIf, comfortable,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -123,6 +123,9 @@ function Rung({
         opacity: finalOpacity,
         filter: blurEnabled && blurFactor > 0.3 ? `blur(${blurFactor.toFixed(1)}px)` : 'none',
       }}
+      role="listitem"
+      aria-label={`${isBSL ? 'Buy-side' : 'Sell-side'} liquidity ${level.name || level.pool_type} at ${level.price.toFixed(2)}, ${level.sweep_status || 'Untouched'}${isImminent ? ', price imminent' : ''}`}
+      title={`${isBSL ? 'BSL (Buy-Side)' : 'SSL (Sell-Side)'} · ${level.name || level.pool_type} · ${level.price.toFixed(2)} · ${level.sweep_status || 'Untouched'}`}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, level); }}
     >
       {/* Distance + Sweep Prob (left) */}
@@ -217,12 +220,12 @@ function Rung({
             </span>
           )}
           {/* Label */}
-          <span className={cn('text-[8px] font-medium truncate', isSwept ? 'line-through text-slate-600' : '')}
+          <span className={cn('font-medium truncate', comfortable ? 'text-[11px]' : 'text-[8px]', isSwept ? 'line-through text-slate-600' : '')}
             style={{ color: isSwept ? '#52525b' : isAutoSession ? '#a78bfa' : strength.color }}>
             {level.name || level.pool_type}
           </span>
           {/* Price */}
-          <span className={cn('text-[8px] tabular-nums font-mono ml-1', isSwept ? 'text-slate-700' : 'text-slate-400')}>
+          <span className={cn('tabular-nums font-mono ml-1', comfortable ? 'text-[11px]' : 'text-[8px]', isSwept ? 'text-slate-700' : 'text-slate-400')}>
             {level.price.toFixed(0)}
           </span>
         </div>
@@ -390,6 +393,16 @@ export default function LiquidityLadder() {
   }, [snapEnabled]);
   // Transient hint showing what we snapped to (e.g. "▸ 4210 (level)")
   const [snapHint, setSnapHint] = useState(null);
+
+  // Text density / readability. 'comfortable' bumps the tiny 6–9px text up a
+  // notch for accessibility. Persisted. Default keeps the current 'compact'.
+  const [density, setDensity] = useState(() => {
+    try { return localStorage.getItem('lh_ladder_density') === 'comfortable' ? 'comfortable' : 'compact'; } catch { return 'compact'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_density', density); } catch {}
+  }, [density]);
+  const comfortable = density === 'comfortable';
 
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
@@ -927,32 +940,39 @@ export default function LiquidityLadder() {
       )}
 
       {/* Zoom controls */}
-      <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1">
+      <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1" role="toolbar" aria-label="Ladder view controls">
         <button onClick={() => setZoom(prev => Math.min(15, prev + 0.3))}
+          aria-label="Zoom in" title="Zoom in"
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">+</button>
         <button onClick={() => setZoom(prev => Math.max(0.3, prev - 0.3))}
+          aria-label="Zoom out" title="Zoom out"
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">−</button>
         <button onClick={() => setXPan(prev => Math.min(60, prev + 10))}
+          aria-label="Pan left (reveal empty space on the right)"
           title="Shift the price line left to reveal empty space on the right"
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">◀</button>
         <button onClick={() => setXPan(prev => Math.max(0, prev - 10))}
           disabled={xPan <= 0}
+          aria-label="Pan right (bring the price line back toward the edge)"
           title="Bring the price line back toward the right edge"
           className={cn('w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] flex items-center justify-center',
             xPan <= 0 ? 'text-slate-700 cursor-not-allowed' : 'text-slate-400 hover:text-white'
           )}>▶</button>
         <button onClick={recenterOnPrice}
+          aria-label="Center on current price"
           title="Snap the ladder back so the current price is centered (keeps your zoom level)"
           disabled={lastPrice <= 0}
           className={cn('h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] flex items-center justify-center',
             lastPrice <= 0 ? 'text-slate-700 cursor-not-allowed' : 'text-slate-500 hover:text-teal-400'
           )}>🎯 Price</button>
         <button onClick={resetView}
+          aria-label="Recenter view (keeps zoom)"
           title="Recenter the view (keeps your current zoom level)"
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
         <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
         <button
           onClick={() => setBlurEnabled(prev => !prev)}
+          aria-label="Toggle depth-of-field blur" aria-pressed={blurEnabled}
           title={blurEnabled ? 'Depth-of-field blur ON — click to turn off' : 'Depth-of-field blur OFF — click to turn on'}
           className={cn(
             'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
@@ -965,6 +985,7 @@ export default function LiquidityLadder() {
         </button>
         <button
           onClick={() => setSnapEnabled(prev => !prev)}
+          aria-label="Toggle snap-to-price" aria-pressed={snapEnabled}
           title={snapEnabled
             ? 'Snap-to-price ON — new/dragged levels snap to nearby levels, session H/L, price & round numbers (hold Alt to bypass)'
             : 'Snap-to-price OFF — levels land exactly where you place them'}
@@ -979,6 +1000,7 @@ export default function LiquidityLadder() {
         </button>
         <button
           onClick={toggleWhatIf}
+          aria-label="Toggle What-If preview mode" aria-pressed={whatIfActive}
           title={whatIfActive
             ? 'What-If mode ON — move the cursor to preview which levels would be swept (no data is changed). Click to exit.'
             : 'What-If mode — preview which levels a hypothetical price would sweep'}
@@ -990,6 +1012,19 @@ export default function LiquidityLadder() {
           )}
         >
           🔮 What-If
+        </button>
+        <button
+          onClick={() => setDensity(prev => prev === 'comfortable' ? 'compact' : 'comfortable')}
+          aria-label="Toggle text size" aria-pressed={comfortable}
+          title={comfortable ? 'Larger text ON — click for compact text' : 'Compact text — click for larger, more readable text'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            comfortable
+              ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          {comfortable ? '🔎 large' : '🔎 text'}
         </button>
       </div>
 
@@ -1184,7 +1219,7 @@ export default function LiquidityLadder() {
       )}
 
       {/* Rungs + Price Line (SAME container so coordinates match) */}
-      <div className="absolute inset-0 top-5 bottom-5">
+      <div className="absolute inset-0 top-5 bottom-5" role="list" aria-label="Liquidity levels">
         {/* Price Line SVG */}
         {priceLine.length > 5 && priceMarkerPercent !== null && (
           <svg className="absolute inset-0 w-full h-full pointer-events-none z-[6]" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -1312,6 +1347,7 @@ export default function LiquidityLadder() {
               onContextMenu={handleRungContextMenu}
               blurEnabled={blurEnabled}
               whatIf={whatIf}
+              comfortable={comfortable}
             />
           );
         })}
