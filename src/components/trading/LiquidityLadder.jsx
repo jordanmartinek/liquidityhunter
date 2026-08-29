@@ -370,6 +370,17 @@ export default function LiquidityLadder() {
   // Depth-of-field blur toggle (off by default so labels stay sharp for analysis)
   const [blurEnabled, setBlurEnabled] = useState(false);
 
+  // Snap-to-price: when adding/dragging levels, snap to nearby anchors
+  // (existing levels, session H/L, current price, round numbers). On by default.
+  const [snapEnabled, setSnapEnabled] = useState(() => {
+    try { return localStorage.getItem('lh_ladder_snap') !== 'off'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_snap', snapEnabled ? 'on' : 'off'); } catch {}
+  }, [snapEnabled]);
+  // Transient hint showing what we snapped to (e.g. "▸ 4210 (level)")
+  const [snapHint, setSnapHint] = useState(null);
+
   // Heatmap + Kill Zone state
   const [heatmapGradient, setHeatmapGradient] = useState('transparent');
   const [killZoneOpacity, setKillZoneOpacity] = useState(1);
@@ -417,6 +428,65 @@ export default function LiquidityLadder() {
     const pct = ((clientY - rect.top) / rect.height) * 100;
     return { pct, price: percentToPrice(pct) };
   }, [percentToPrice]);
+
+  // ── Snap-to-price ───────────────────────────────────────────────────
+  // Candidate anchors are mirrored into a ref so the snap helper stays stable.
+  const snapAnchorsRef = useRef({ levels: [], session: null, lastPrice: 0 });
+  snapAnchorsRef.current = {
+    levels: filteredLevels,
+    session: sessionLevelsState,
+    lastPrice,
+  };
+
+  // Round-number step scales with price magnitude so snapping feels natural
+  // on both small and large instruments.
+  const roundStepFor = (price) => {
+    const abs = Math.abs(price);
+    if (abs >= 10000) return 50;
+    if (abs >= 1000) return 25;
+    if (abs >= 100) return 5;
+    if (abs >= 10) return 1;
+    return 0.5;
+  };
+
+  // Given a raw price, return { price, label } snapped to the nearest anchor
+  // within a tolerance (~1.2% of the visible price range), else the raw price.
+  const snapPrice = useCallback((raw) => {
+    if (!raw || raw <= 0) return { price: raw, label: null };
+    const { levels, session, lastPrice } = snapAnchorsRef.current;
+    const { totalRange, zoom } = transformRef.current;
+    // Tolerance in price units — tied to how much price one screen covers,
+    // shrinking as you zoom in so precise placement is still possible.
+    const visibleRange = (totalRange || 1) / (zoom || 1);
+    const tol = Math.max(visibleRange * 0.012, raw * 0.0002);
+
+    const candidates = [];
+    (levels || []).forEach(l => { if (l?.price > 0) candidates.push({ price: l.price, label: `${l.name || l.pool_type || 'level'}`, kind: 'level' }); });
+    if (session?.asia?.high) candidates.push({ price: session.asia.high, label: 'Asia High', kind: 'session' });
+    if (session?.asia?.low) candidates.push({ price: session.asia.low, label: 'Asia Low', kind: 'session' });
+    if (session?.london?.high) candidates.push({ price: session.london.high, label: 'London High', kind: 'session' });
+    if (session?.london?.low) candidates.push({ price: session.london.low, label: 'London Low', kind: 'session' });
+    if (lastPrice > 0) candidates.push({ price: lastPrice, label: 'Current price', kind: 'price' });
+    // Nearest round number
+    const step = roundStepFor(raw);
+    const round = Math.round(raw / step) * step;
+    candidates.push({ price: round, label: `round ${round}`, kind: 'round' });
+
+    let best = null;
+    for (const c of candidates) {
+      const d = Math.abs(c.price - raw);
+      if (d <= tol && (!best || d < best.d)) best = { ...c, d };
+    }
+    if (best) return { price: best.price, label: `${best.price.toFixed(2)} · ${best.label}` };
+    return { price: raw, label: null };
+  }, []);
+
+  // Apply snapping unless disabled, or bypassed by holding Alt/Option.
+  const maybeSnap = useCallback((raw, evt) => {
+    const bypass = evt?.altKey;
+    if (!snapEnabled || bypass) return { price: raw, label: null };
+    return snapPrice(raw);
+  }, [snapEnabled, snapPrice]);
 
   // Keep the live refs current so the per-tick effect never reads stale values.
   useEffect(() => { filteredLevelsRef.current = filteredLevels; }, [filteredLevels]);
@@ -535,6 +605,12 @@ export default function LiquidityLadder() {
     // #12: Drag-to-edit handling
     if (dragEditLevel) {
       setDragEditY(e.clientY);
+      // Live snap hint so you can see where the level will land
+      const res = clientYToPrice(e.clientY);
+      if (res) {
+        const s = maybeSnap(res.price, e);
+        setSnapHint(s.label ? { pct: res.pct, label: s.label } : null);
+      }
       return;
     }
     if (!isDragging) return;
@@ -557,8 +633,9 @@ export default function LiquidityLadder() {
       const containerRect = containerRef.current?.getBoundingClientRect();
       if (containerRect) {
         const viewPct = ((dragEditY - containerRect.top) / containerRect.height) * 100;
-        // Reverse the shared transform: viewPct → price
-        const newPrice = percentToPrice(viewPct);
+        // Reverse the shared transform: viewPct → price, then snap
+        const rawPrice = percentToPrice(viewPct);
+        const newPrice = maybeSnap(rawPrice, e).price;
 
         // Only update if price is reasonable
         if (newPrice > 0 && Math.abs(newPrice - dragEditLevel.price) > 0.5) {
@@ -567,6 +644,7 @@ export default function LiquidityLadder() {
       }
       setDragEditLevel(null);
       setDragEditY(null);
+      setSnapHint(null);
       return;
     }
     setIsDragging(false);
@@ -583,15 +661,16 @@ export default function LiquidityLadder() {
   const handleDoubleClick = useCallback((e) => {
     const res = clientYToPrice(e.clientY);
     if (!res) return;
-    const price = res.price;
+    const snapped = maybeSnap(res.price, e);
+    const price = snapped.price;
     if (price > 0) {
-      const name = prompt(`Quick-add level at ${price.toFixed(2)}\nEnter name (or cancel):`);
+      const name = prompt(`Quick-add level at ${price.toFixed(2)}${snapped.label ? '  (snapped to ' + snapped.label + ')' : ''}\nEnter name (or cancel):`);
       if (name !== null) {
         const side = price > lastPrice ? 'Buy-Side' : 'Sell-Side';
         addLevel({ price: parseFloat(price.toFixed(2)), name: name || `Level ${price.toFixed(0)}`, side, pool_type: 'Custom', timeframe: '1H', strength: 3, sweep_status: 'Untouched' });
       }
     }
-  }, [clientYToPrice, lastPrice, addLevel]);
+  }, [clientYToPrice, lastPrice, addLevel, maybeSnap]);
 
   // #22: Right-click context menu on rungs
   const handleRungContextMenu = useCallback((e, level) => {
@@ -813,6 +892,20 @@ export default function LiquidityLadder() {
           )}
         >
           {blurEnabled ? '🔵 blur' : '⚪ blur'}
+        </button>
+        <button
+          onClick={() => setSnapEnabled(prev => !prev)}
+          title={snapEnabled
+            ? 'Snap-to-price ON — new/dragged levels snap to nearby levels, session H/L, price & round numbers (hold Alt to bypass)'
+            : 'Snap-to-price OFF — levels land exactly where you place them'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            snapEnabled
+              ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          {snapEnabled ? '🧲 snap' : '🧲 off'}
         </button>
       </div>
 
@@ -1172,7 +1265,21 @@ export default function LiquidityLadder() {
               <div className="flex-1 h-[2px] bg-teal-400/60 border-dashed" />
               <span className="text-[8px] text-teal-400 font-mono ml-1 bg-terminal-bg/80 px-1 rounded">
                 Moving: {dragEditLevel.name || dragEditLevel.pool_type}
+                {snapHint?.label && <span className="text-amber-300 ml-1">🧲 {snapHint.label}</span>}
               </span>
+            </div>
+          );
+        })()}
+
+        {/* Snap magnet guide — highlights the anchor the level will snap to */}
+        {dragEditLevel && snapHint?.label && (() => {
+          const snappedPrice = parseFloat(snapHint.label);
+          if (!snappedPrice) return null;
+          const pct = priceToPercent(snappedPrice);
+          return (
+            <div className="absolute left-0 right-0 flex items-center z-[49] pointer-events-none"
+              style={{ top: `${pct}%`, transform: 'translateY(-50%)' }}>
+              <div className="flex-1 h-px bg-amber-400/70 border-t border-dashed border-amber-400/80" />
             </div>
           );
         })()}
