@@ -387,6 +387,10 @@ export default function LiquidityLadder() {
   // New enhancement states
   const [sfpDetections, setSfpDetections] = useState([]);
   const [sweepReactions, setSweepReactions] = useState({}); // levelId -> { status, movePts }
+  // Prominent "Sweep Outcome" banner shown when a swept level first classifies
+  // as reversal / continuation / chop. { id, status, levelName, levelPrice, movePts }
+  const [sweepOutcome, setSweepOutcome] = useState(null);
+  const seenReactionsRef = useRef({}); // levelId -> status already announced
   const [liquidityVoids, setLiquidityVoids] = useState([]);
   const [openingRange, setOpeningRange] = useState(null);
   const [gravityWeights, setGravityWeights] = useState([]);
@@ -476,9 +480,18 @@ export default function LiquidityLadder() {
   const [notifyOn, setNotifyOn] = useState(() => {
     try { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; } catch { return false; }
   });
-  // Keep a live ref so the per-tick alert path can fire notifications without re-subscribing.
+  // Keep live refs so the per-tick alert path can fire sound/notifications without re-subscribing.
   const notifyOnRef = useRef(notifyOn);
   useEffect(() => { notifyOnRef.current = notifyOn; }, [notifyOn]);
+  const soundOnRef = useRef(soundOn);
+  useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
+
+  // Auto-dismiss the Sweep Outcome banner a few seconds after it appears.
+  useEffect(() => {
+    if (!sweepOutcome) return;
+    const t = setTimeout(() => setSweepOutcome(null), 9000);
+    return () => clearTimeout(t);
+  }, [sweepOutcome]);
 
   const toggleSound = useCallback(() => {
     setSoundOn(prev => {
@@ -703,8 +716,28 @@ export default function LiquidityLadder() {
 
     // Sweep → reaction tagging (classify how price behaves after a sweep)
     sweepReactionTracker.update(curLevels, lastPrice);
+    const allReactions = sweepReactionTracker.getAll();
+    // Detect a NEWLY classified reaction and raise the prominent banner + alert.
+    for (const [levelId, r] of Object.entries(allReactions)) {
+      if (seenReactionsRef.current[levelId] === r.status) continue; // already announced
+      seenReactionsRef.current[levelId] = r.status;
+      const lvl = curLevels.find(l => l.id === levelId);
+      const levelName = lvl?.name || lvl?.pool_type || 'Level';
+      const levelPrice = lvl?.price || 0;
+      setSweepOutcome({ id: `${levelId}_${Date.now()}`, status: r.status, levelName, levelPrice, movePts: r.movePts });
+      // Sound + notification for the actionable outcomes only (skip chop noise).
+      if (r.status === 'continuation' || r.status === 'reversal') {
+        try { if (soundOnRef.current) { ladderAudio.init(); r.status === 'reversal' ? ladderAudio.sweep?.(levelId) : ladderAudio.displacement?.(); } } catch {}
+        try {
+          if (notifyOnRef.current) {
+            const title = r.status === 'continuation' ? '↠ Sweep FAILED — continuation' : '↩︎ Sweep reversed';
+            sendNotification(title, `${levelName} @ ${levelPrice.toFixed(2)} (${r.movePts} pts)`, 'lh_sweep_outcome');
+          }
+        } catch {}
+      }
+    }
     if (priceLineRef.current.length % 5 === 0) {
-      setSweepReactions(sweepReactionTracker.getAll());
+      setSweepReactions(allReactions);
     }
 
     // Opening Range tracking
@@ -1157,6 +1190,31 @@ export default function LiquidityLadder() {
         transition: 'opacity 2s ease',
       }}
     >
+      {/* Sweep Outcome banner — prominent alert when a swept level classifies */}
+      {sweepOutcome && (() => {
+        const isCont = sweepOutcome.status === 'continuation';
+        const isRev = sweepOutcome.status === 'reversal';
+        const style = isCont
+          ? { ring: 'border-red-500/70 bg-red-950/90', text: 'text-red-200', icon: '↠', head: 'SWEEP FAILED — CONTINUATION' }
+          : isRev
+          ? { ring: 'border-emerald-500/70 bg-emerald-950/90', text: 'text-emerald-200', icon: '↩︎', head: 'SWEEP REVERSED' }
+          : { ring: 'border-slate-500/60 bg-slate-900/90', text: 'text-slate-300', icon: '≈', head: 'SWEEP CHOP' };
+        return (
+          <div className={cn('absolute top-9 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 px-3 py-2 rounded-lg border shadow-xl max-w-[92%] animate-pulse-glow', style.ring)}>
+            <span className={cn('text-base leading-none', style.text)}>{sweepOutcome.icon}</span>
+            <div className="min-w-0">
+              <div className={cn('text-[10px] font-bold uppercase tracking-wider whitespace-nowrap', style.text)}>{style.head}</div>
+              <div className="text-[9px] text-slate-300 truncate">
+                {sweepOutcome.levelName} @ {sweepOutcome.levelPrice > 0 ? sweepOutcome.levelPrice.toFixed(2) : '—'} · {sweepOutcome.movePts} pts
+              </div>
+            </div>
+            <button onClick={() => setSweepOutcome(null)}
+              aria-label="Dismiss sweep outcome"
+              className="ml-1 shrink-0 text-slate-400 hover:text-white text-[11px] leading-none">✕</button>
+          </div>
+        );
+      })()}
+
       {/* Liquidity Gradient Heatmap background */}
       {effectiveLayers.heatmap && (
         <div className="absolute inset-0 pointer-events-none z-[1]"
