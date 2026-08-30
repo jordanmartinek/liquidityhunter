@@ -93,6 +93,49 @@ export default function PaperTradePanel() {
     return () => window.removeEventListener('lh:paper-prefill', onPrefill);
   }, []);
 
+  // Click-to-set: which field (if any) is waiting for a ladder click.
+  const [picking, setPicking] = useState(null);
+  useEffect(() => {
+    const onPicked = (e) => {
+      const { field, price } = e.detail || {};
+      if (!field || price == null) return;
+      setForm(f => ({ ...f, [field]: String(price) }));
+      setPicking(null);
+    };
+    const onCancel = () => setPicking(null);
+    window.addEventListener('lh:pick-price', onPicked);
+    window.addEventListener('lh:cancel-pick', onCancel);
+    return () => {
+      window.removeEventListener('lh:pick-price', onPicked);
+      window.removeEventListener('lh:cancel-pick', onCancel);
+    };
+  }, []);
+  // Arm the ladder to capture the next click into `field`. Ensures the ladder
+  // is visible (center view) so there's something to click.
+  const armPick = (field) => {
+    const next = picking === field ? null : field;
+    setPicking(next);
+    try {
+      if (next) {
+        window.dispatchEvent(new CustomEvent('lh:show-ladder'));
+        window.dispatchEvent(new CustomEvent('lh:arm-pick', { detail: { field: next } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('lh:cancel-pick'));
+      }
+    } catch {}
+  };
+  // A tiny reusable "pick from ladder" button.
+  const PickBtn = ({ field }) => (
+    <button type="button" onClick={() => armPick(field)}
+      title="Click a level on the ladder to set this"
+      className={cn('h-6 px-1 rounded text-[9px] border shrink-0',
+        picking === field
+          ? 'bg-purple-500/30 border-purple-400/60 text-purple-200 animate-pulse'
+          : 'bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:text-purple-300 hover:border-purple-500/40')}>
+      ⌖
+    </button>
+  );
+
   // ── Live P&L helpers ────────────────────────────────────────────────
   // Unrealized P&L for an open trade at the current price (points + R).
   const livePnL = (trade, price) => {
@@ -571,23 +614,33 @@ export default function PaperTradePanel() {
               </button>
             </div>
 
+            <div className="text-[8px] text-zinc-600 px-1">⌖ = click a level on the ladder to set the price</div>
             {/* Entry / Stop / Target */}
             <div className="grid grid-cols-3 gap-1">
               <div>
                 <label className="text-[8px] text-zinc-500 uppercase">Entry</label>
-                <input type="number" step="0.01" value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })}
-                  placeholder={lastPrice > 0 ? lastPrice.toFixed(0) : '0'}
-                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                <div className="flex gap-0.5">
+                  <input type="number" step="0.01" value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })}
+                    placeholder={lastPrice > 0 ? lastPrice.toFixed(0) : '0'}
+                    className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                  <PickBtn field="entry" />
+                </div>
               </div>
               <div>
                 <label className="text-[8px] text-zinc-500 uppercase">Stop</label>
-                <input type="number" step="0.01" value={form.stop} onChange={(e) => setForm({ ...form, stop: e.target.value })}
-                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                <div className="flex gap-0.5">
+                  <input type="number" step="0.01" value={form.stop} onChange={(e) => setForm({ ...form, stop: e.target.value })}
+                    className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                  <PickBtn field="stop" />
+                </div>
               </div>
               <div>
                 <label className="text-[8px] text-zinc-500 uppercase">T1</label>
-                <input type="number" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}
-                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                <div className="flex gap-0.5">
+                  <input type="number" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}
+                    className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                  <PickBtn field="target" />
+                </div>
               </div>
             </div>
 
@@ -598,13 +651,19 @@ export default function PaperTradePanel() {
               </div>
               <div>
                 <label className="text-[8px] text-zinc-500 uppercase">T2 (opt)</label>
-                <input type="number" step="0.01" value={form.target2} onChange={(e) => setForm({ ...form, target2: e.target.value })}
-                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                <div className="flex gap-0.5">
+                  <input type="number" step="0.01" value={form.target2} onChange={(e) => setForm({ ...form, target2: e.target.value })}
+                    className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                  <PickBtn field="target2" />
+                </div>
               </div>
               <div>
                 <label className="text-[8px] text-zinc-500 uppercase">T3 (opt)</label>
-                <input type="number" step="0.01" value={form.target3} onChange={(e) => setForm({ ...form, target3: e.target.value })}
-                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                <div className="flex gap-0.5">
+                  <input type="number" step="0.01" value={form.target3} onChange={(e) => setForm({ ...form, target3: e.target.value })}
+                    className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                  <PickBtn field="target3" />
+                </div>
               </div>
             </div>
             {(form.target2 || form.target3) && (
