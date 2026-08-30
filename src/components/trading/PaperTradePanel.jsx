@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 
 const STORAGE_KEY = 'lh_paper_trades';
 const SIZE_KEY = 'lh_paper_size';
+const BALANCE_KEY = 'lh_paper_balance';
 
 function loadPaperTrades() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
@@ -35,6 +36,11 @@ export default function PaperTradePanel() {
     try { const n = parseFloat(localStorage.getItem(SIZE_KEY)); return n > 0 ? n : 1; } catch { return 1; }
   });
   useEffect(() => { try { localStorage.setItem(SIZE_KEY, String(contracts)); } catch {} }, [contracts]);
+  // Starting account balance for equity tracking. Persisted.
+  const [startBalance, setStartBalance] = useState(() => {
+    try { const n = parseFloat(localStorage.getItem(BALANCE_KEY)); return n > 0 ? n : 10000; } catch { return 10000; }
+  });
+  useEffect(() => { try { localStorage.setItem(BALANCE_KEY, String(startBalance)); } catch {} }, [startBalance]);
   // $ per point for the active instrument (falls back to 1 if unknown).
   const pointValue = (INSTRUMENTS.find(i => i.symbol === symbol)?.point_value) || 1;
   const [form, setForm] = useState({
@@ -143,31 +149,62 @@ export default function PaperTradePanel() {
     };
   }, [trades]);
 
-  // Realized dollars per resolved trade → cumulative equity curve.
-  // Uses each trade's own point-value/size snapshot for accuracy.
+  // Directional per-contract $ moved from entry to an exit price.
+  const legDollars = (t, exitPrice, qty) => {
+    const dir = t.direction === 'long' ? 1 : -1;
+    const pv = t.pointValue || 1;
+    return (exitPrice - t.entry) * dir * pv * qty;
+  };
+
+  // Total realized dollars for a resolved trade, including any partial
+  // scale-outs plus the close of the remaining size.
   const realizedDollars = (t) => {
     const pv = t.pointValue || 1;
-    const qty = t.contracts || 1;
-    const dir = t.direction === 'long' ? 1 : -1;
-    if (t.result === 'target_hit') return Math.abs(t.target - t.entry) * pv * qty;
-    if (t.result === 'stop_hit') return -Math.abs(t.entry - t.stop) * pv * qty;
-    if (t.result === 'vwap_break') {
-      // Exit at current/last price if we have it, else treat as -1R.
-      return -Math.abs(t.entry - t.stop) * pv * qty;
-    }
-    if (t.result === 'breakeven') return 0;
-    return 0;
+    const totalQty = t.contracts || 1;
+    const scaled = (t.scaleOuts || []).reduce((sum, s) => sum + legDollars(t, s.price, s.qty), 0);
+    const scaledQty = (t.scaleOuts || []).reduce((sum, s) => sum + s.qty, 0);
+    const remQty = Math.max(0, totalQty - scaledQty);
+    // Exit price for the remaining size based on how the trade resolved.
+    let remExit;
+    if (t.result === 'target_hit') remExit = t.target;
+    else if (t.result === 'stop_hit') remExit = t.stop;
+    else if (t.result === 'vwap_break') remExit = t.exitPrice != null ? t.exitPrice : t.stop;
+    else if (t.result === 'breakeven') remExit = t.entry;
+    else remExit = t.entry;
+    return scaled + legDollars(t, remExit, remQty);
   };
+
   const equity = useMemo(() => {
     // Resolved trades in chronological order (trades are stored newest-first).
     const resolved = trades.filter(t => t.result !== 'pending')
       .slice().sort((a, b) => new Date(a.resolved || a.created) - new Date(b.resolved || b.created));
     let cum = 0;
-    const curve = [0];
-    let wins = 0;
-    resolved.forEach(t => { const d = realizedDollars(t); cum += d; if (d > 0) wins++; curve.push(cum); });
-    return { total: cum, curve, count: resolved.length, wins };
-  }, [trades]);
+    const curve = [startBalance]; // account value curve, starting at the balance
+    let peak = startBalance, maxDD = 0, maxDDPct = 0;
+    let best = null, worst = null, winSum = 0, lossSum = 0, winN = 0, lossN = 0;
+    resolved.forEach(t => {
+      const d = realizedDollars(t);
+      cum += d;
+      const acct = startBalance + cum;
+      curve.push(acct);
+      if (acct > peak) peak = acct;
+      const dd = peak - acct;
+      if (dd > maxDD) { maxDD = dd; maxDDPct = peak > 0 ? (dd / peak) * 100 : 0; }
+      if (best === null || d > best) best = d;
+      if (worst === null || d < worst) worst = d;
+      if (d > 0) { winSum += d; winN++; } else if (d < 0) { lossSum += d; lossN++; }
+    });
+    return {
+      total: cum,
+      account: startBalance + cum,
+      curve,
+      count: resolved.length,
+      maxDD, maxDDPct,
+      best, worst,
+      avgWin: winN ? winSum / winN : 0,
+      avgLoss: lossN ? lossSum / lossN : 0,
+    };
+  }, [trades, startBalance]);
 
   // Submit paper trade
   const handleSubmit = () => {
@@ -204,6 +241,29 @@ export default function PaperTradePanel() {
     setTrades(prev => prev.map(t => t.id === id ? { ...t, result, resolved: new Date().toISOString() } : t));
   };
 
+  // Scale out a fraction of an open trade at the current price. Records the
+  // partial and, if fully scaled, resolves the trade as a (blended) target hit.
+  const scaleOut = (id, fraction) => {
+    if (!lastPrice || lastPrice <= 0) return;
+    setTrades(prev => prev.map(t => {
+      if (t.id !== id || t.result !== 'pending') return t;
+      const totalQty = t.contracts || 1;
+      const alreadyOut = (t.scaleOuts || []).reduce((s, x) => s + x.qty, 0);
+      const remaining = totalQty - alreadyOut;
+      if (remaining <= 0) return t;
+      // Portion of the ORIGINAL size; never exceed what's left.
+      let qty = fraction >= 1 ? remaining : Math.min(remaining, Math.max(1, Math.round(totalQty * fraction)));
+      const scaleOuts = [...(t.scaleOuts || []), { qty, price: parseFloat(lastPrice.toFixed(2)), time: new Date().toISOString() }];
+      const outNow = alreadyOut + qty;
+      // If everything is now out, close the trade (blended); else move stop to
+      // breakeven on the runner (classic partial management) and keep it open.
+      if (outNow >= totalQty) {
+        return { ...t, scaleOuts, result: 'target_hit', resolved: new Date().toISOString(), exitPrice: lastPrice, auto: false, partial: true };
+      }
+      return { ...t, scaleOuts, stop: t.movedToBE ? t.stop : t.entry, movedToBE: true };
+    }));
+  };
+
   // Delete a trade
   const deleteTrade = (id) => {
     setTrades(prev => prev.filter(t => t.id !== id));
@@ -233,6 +293,27 @@ export default function PaperTradePanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+        {/* Account equity — running balance + realized session P&L */}
+        <div className="flex items-center justify-between px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-900/60">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] uppercase tracking-wider text-zinc-500">Account</span>
+            <span className="text-[9px] text-zinc-600">start $</span>
+            <input type="number" min="0" step="100" value={startBalance}
+              onChange={(e) => setStartBalance(Math.max(0, parseFloat(e.target.value) || 0))}
+              className="w-20 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+          </div>
+          <div className="text-right tabular-nums font-mono">
+            <div className={cn('text-base font-bold', equity.account >= startBalance ? 'text-emerald-400' : 'text-red-400')}>
+              ${equity.account.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            </div>
+            {equity.count > 0 && (
+              <div className={cn('text-[9px]', equity.total >= 0 ? 'text-emerald-400/70' : 'text-red-400/70')}>
+                {equity.total >= 0 ? '+' : '−'}${Math.abs(equity.total).toFixed(0)} ({startBalance > 0 ? ((equity.total / startBalance) * 100).toFixed(1) : '0.0'}%)
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Stats bar */}
         {showStats && stats.completed > 0 && (
           <div className="grid grid-cols-4 gap-1 p-2 bg-zinc-900/50 rounded border border-zinc-800">
@@ -251,6 +332,29 @@ export default function PaperTradePanel() {
             <div className="text-center">
               <div className="text-[10px] text-zinc-500">Trades</div>
               <div className="text-sm font-bold tabular-nums text-zinc-300">{stats.completed}</div>
+            </div>
+            {/* Risk stats row */}
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Max DD</div>
+              <div className="text-sm font-bold tabular-nums text-red-400" title="Max drawdown from peak equity">
+                −${equity.maxDD.toFixed(0)}<span className="text-[9px] text-red-400/60"> {equity.maxDDPct.toFixed(1)}%</span>
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Best</div>
+              <div className="text-sm font-bold tabular-nums text-emerald-400">+${(equity.best || 0).toFixed(0)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Worst</div>
+              <div className="text-sm font-bold tabular-nums text-red-400">${(equity.worst || 0).toFixed(0)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] text-zinc-500">Avg W/L</div>
+              <div className="text-[11px] font-bold tabular-nums text-zinc-300">
+                <span className="text-emerald-400">+{equity.avgWin.toFixed(0)}</span>
+                <span className="text-zinc-600">/</span>
+                <span className="text-red-400">{equity.avgLoss.toFixed(0)}</span>
+              </div>
             </div>
           </div>
         )}
@@ -301,11 +405,11 @@ export default function PaperTradePanel() {
                 return `${x.toFixed(1)},${y.toFixed(1)}`;
               }).join(' ');
               const up = equity.total >= 0;
-              // Zero baseline position
-              const zeroY = H - ((0 - min) / range) * H;
+              // Baseline = starting balance (break-even line)
+              const baseY = H - ((startBalance - min) / range) * H;
               return (
                 <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-6">
-                  <line x1="0" y1={zeroY} x2={W} y2={zeroY} stroke="rgba(148,163,184,0.25)" strokeWidth="0.5" strokeDasharray="2 2" />
+                  <line x1="0" y1={baseY} x2={W} y2={baseY} stroke="rgba(148,163,184,0.25)" strokeWidth="0.5" strokeDasharray="2 2" />
                   <polyline points={pts} fill="none"
                     stroke={up ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.9)'} strokeWidth="1.2"
                     strokeLinejoin="round" strokeLinecap="round" />
@@ -444,6 +548,30 @@ export default function PaperTradePanel() {
                   {lastPrice > 0 && <span className="text-cyan-400">@ {lastPrice.toFixed(2)}</span>}
                 </div>
                 {trade.setupNotes && <p className="text-[9px] text-zinc-500 italic">{trade.setupNotes}</p>}
+                {/* Scaled-out summary */}
+                {trade.scaleOuts?.length > 0 && (() => {
+                  const outQty = trade.scaleOuts.reduce((s, x) => s + x.qty, 0);
+                  const bankedPts = trade.scaleOuts.reduce((s, x) => s + (x.price - trade.entry) * (trade.direction === 'long' ? 1 : -1) * x.qty, 0);
+                  const banked = bankedPts * (trade.pointValue || pointValue);
+                  return (
+                    <div className="text-[8px] text-cyan-400/80 flex items-center gap-1">
+                      <span>⚖ scaled {outQty}/{trade.contracts || 1}</span>
+                      <span className={banked >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}>
+                        banked {banked >= 0 ? '+' : '−'}${Math.abs(banked).toFixed(0)}
+                      </span>
+                      {trade.movedToBE && <span className="text-zinc-500">· stop→BE</span>}
+                    </div>
+                  );
+                })()}
+                {/* Scale-out (partial take-profit) buttons */}
+                {lastPrice > 0 && (trade.contracts || 1) - (trade.scaleOuts?.reduce((s, x) => s + x.qty, 0) || 0) > 0 && (
+                  <div className="flex gap-1">
+                    <span className="text-[8px] text-zinc-600 self-center">Scale out:</span>
+                    <button onClick={() => scaleOut(trade.id, 0.5)} className="flex-1 py-0.5 rounded text-[8px] font-medium bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20">½ @ mkt</button>
+                    <button onClick={() => scaleOut(trade.id, 0.25)} className="flex-1 py-0.5 rounded text-[8px] font-medium bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20">¼ @ mkt</button>
+                    <button onClick={() => scaleOut(trade.id, 1)} className="flex-1 py-0.5 rounded text-[8px] font-medium bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20">All @ mkt</button>
+                  </div>
+                )}
                 {/* Resolve buttons */}
                 <div className="flex gap-1 pt-1">
                   <button onClick={() => resolveTrade(trade.id, 'target_hit')} className="flex-1 py-1 rounded text-[8px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20">Target ✓</button>
