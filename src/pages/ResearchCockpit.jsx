@@ -62,10 +62,16 @@ export default function ResearchCockpit() {
 
   // "Paper trade this level" from the ladder switches the right rail to Paper
   // so the panel mounts and picks up the prefilled trade.
+  // "Click to set" (⌖) from the Paper form makes sure the ladder is visible.
   useEffect(() => {
     const openPaper = () => setRightPanel('paper');
+    const showLadder = () => setCenterView('ladder');
     window.addEventListener('lh:open-paper', openPaper);
-    return () => window.removeEventListener('lh:open-paper', openPaper);
+    window.addEventListener('lh:show-ladder', showLadder);
+    return () => {
+      window.removeEventListener('lh:open-paper', openPaper);
+      window.removeEventListener('lh:show-ladder', showLadder);
+    };
   }, []);
 
   // Panel density — scales the left/right rails so you can dial the whole

@@ -471,6 +471,23 @@ export default function LiquidityLadder() {
     });
   }, []);
 
+  // Click-to-set: when the Paper form arms a field ('entry'/'stop'/'target'/…),
+  // the next click on the ladder captures that price and sends it back.
+  const [pickField, setPickField] = useState(null);
+  const pickFieldRef = useRef(null);
+  useEffect(() => { pickFieldRef.current = pickField; }, [pickField]);
+  useEffect(() => {
+    const onArm = (e) => setPickField(e.detail?.field || null);
+    const onCancel = () => setPickField(null);
+    window.addEventListener('lh:arm-pick', onArm);
+    window.addEventListener('lh:cancel-pick', onCancel);
+    return () => {
+      window.removeEventListener('lh:arm-pick', onArm);
+      window.removeEventListener('lh:cancel-pick', onCancel);
+    };
+  }, []);
+  const PICK_LABELS = { entry: 'ENTRY', stop: 'STOP', target: 'TARGET (T1)', target2: 'TARGET 2', target3: 'TARGET 3' };
+
   // Alerts (sound + browser notifications). Both need a user gesture: sound to
   // unlock the AudioContext, notifications to grant permission.
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -785,6 +802,20 @@ export default function LiquidityLadder() {
   // Vertical drag pans price (panOffset); horizontal drag pans the price line (xPan).
   const handleMouseDown = (e) => {
     if (dragEditLevel) return;
+    // Click-to-set: capture this click's price for the armed Paper field.
+    if (pickFieldRef.current) {
+      const res = clientYToPrice(e.clientY);
+      if (res && res.price > 0) {
+        const snapped = maybeSnap(res.price, e).price;
+        try {
+          window.dispatchEvent(new CustomEvent('lh:pick-price', {
+            detail: { field: pickFieldRef.current, price: parseFloat(snapped.toFixed(2)) },
+          }));
+        } catch {}
+      }
+      setPickField(null);
+      return; // consume the click; don't pan/measure/etc.
+    }
     // Measure tool: start a new measurement from this point (suspends panning)
     if (measureMode) {
       const res = clientYToPrice(e.clientY);
@@ -1185,11 +1216,23 @@ export default function LiquidityLadder() {
       onDoubleClick={handleDoubleClick}
       onClick={closeContextMenu}
       style={{
-        cursor: measureMode ? 'crosshair' : dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
+        cursor: (pickField || measureMode) ? 'crosshair' : dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
         opacity: killZoneOpacity,
         transition: 'opacity 2s ease',
       }}
     >
+      {/* Click-to-set armed banner */}
+      {pickField && (
+        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 px-3 py-1.5 rounded-lg border border-purple-400/70 bg-purple-950/90 shadow-xl">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-purple-200 whitespace-nowrap">
+            🖱️ Click to set {PICK_LABELS[pickField] || pickField}
+          </span>
+          <button onClick={() => { setPickField(null); try { window.dispatchEvent(new CustomEvent('lh:cancel-pick')); } catch {} }}
+            aria-label="Cancel picking"
+            className="text-purple-300 hover:text-white text-[11px] leading-none">✕</button>
+        </div>
+      )}
+
       {/* Sweep Outcome banner — prominent alert when a swept level classifies */}
       {sweepOutcome && (() => {
         const isCont = sweepOutcome.status === 'continuation';
