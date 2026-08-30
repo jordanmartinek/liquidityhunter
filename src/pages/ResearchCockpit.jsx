@@ -60,6 +60,14 @@ export default function ResearchCockpit() {
     setSections(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
+  // "Paper trade this level" from the ladder switches the right rail to Paper
+  // so the panel mounts and picks up the prefilled trade.
+  useEffect(() => {
+    const openPaper = () => setRightPanel('paper');
+    window.addEventListener('lh:open-paper', openPaper);
+    return () => window.removeEventListener('lh:open-paper', openPaper);
+  }, []);
+
   // Panel density — scales the left/right rails so you can dial the whole
   // app's text/spacing up or down from one control. Persisted.
   const DENSITY_SCALE = { compact: 0.85, normal: 1, comfortable: 1.15 };

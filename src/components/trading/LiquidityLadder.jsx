@@ -2018,6 +2018,34 @@ export default function LiquidityLadder() {
               className="w-full px-3 py-1.5 text-left text-[10px] text-amber-400 hover:bg-amber-500/10 flex items-center gap-2">
               <span>🔔</span> Add Alert Zone (±5pts)
             </button>
+            <button onClick={() => {
+              const lvl = contextMenu.level;
+              // Sweeping sell-side liquidity → long; buy-side → short.
+              const direction = lvl.side === 'Sell-Side' ? 'long' : 'short';
+              const buffer = Math.max(lvl.price * 0.0006, 2);
+              const entry = lvl.price;
+              const stop = direction === 'long' ? lvl.price - buffer : lvl.price + buffer;
+              const risk = Math.abs(entry - stop);
+              const target = direction === 'long' ? entry + risk * 2 : entry - risk * 2; // default 2R
+              const payload = {
+                direction,
+                entry: parseFloat(entry.toFixed(2)),
+                stop: parseFloat(stop.toFixed(2)),
+                target: parseFloat(target.toFixed(2)),
+                levelType: lvl.name || lvl.pool_type || '',
+              };
+              try {
+                // Stash for the panel to pick up if it isn't mounted yet, then
+                // request the Paper tab + fire the live event for the mounted case.
+                window.__lhPaperPrefill = payload;
+                window.dispatchEvent(new CustomEvent('lh:open-paper'));
+                window.dispatchEvent(new CustomEvent('lh:paper-prefill', { detail: payload }));
+              } catch {}
+              closeContextMenu();
+            }}
+              className="w-full px-3 py-1.5 text-left text-[10px] text-purple-400 hover:bg-purple-500/10 flex items-center gap-2">
+              <span>📝</span> Paper trade this level
+            </button>
           </div>
         </div>
       )}
