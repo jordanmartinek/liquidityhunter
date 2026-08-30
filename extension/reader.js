@@ -8,6 +8,40 @@
 
 const POLL_INTERVAL = 1000;
 
+// Parse a TradingView legend number like "29,517.00" or "−7.75" → Number|null
+function parseNum(text) {
+  if (!text) return null;
+  const cleaned = text.replace(/\s/g, '').replace(/,/g, '').replace(/−/g, '-');
+  // Reject anything that isn't a plain signed decimal (skips "−7.75 (−0.03%)", "∅", etc.)
+  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+
+// Extract the current forming bar's O/H/L/C from the chart legend.
+// The legend renders values as [class*="valueValue"] cells; filtering to the
+// numeric ones, the first four are Open, High, Low, Close (confirmed against
+// the live DOM). Returns null unless the four values are present and
+// internally consistent (High ≥ max(O,C), Low ≤ min(O,C), sane range).
+function extractOHLC() {
+  const cells = document.querySelectorAll('[class*="valueValue"]');
+  const nums = [];
+  for (const el of cells) {
+    const n = parseNum(el.textContent.trim());
+    if (n !== null) nums.push(n);
+    if (nums.length >= 4) break; // O/H/L/C are the first four numeric cells
+  }
+  if (nums.length < 4) return null;
+  const [open, high, low, close] = nums;
+  const inRange = (v) => v > 1000 && v < 50000;
+  if (![open, high, low, close].every(inRange)) return null;
+  // Consistency: high is the max, low is the min of the bar.
+  if (high < Math.max(open, close) - 0.01) return null;
+  if (low > Math.min(open, close) + 0.01) return null;
+  if (high < low) return null;
+  return { open, high, low, close };
+}
+
 function extractPrice() {
   // Priority 1: Bid/Ask buttons — update tick-by-tick
   const buttons = document.querySelectorAll('[class*="buttonText"]');
@@ -59,7 +93,7 @@ function extractPrice() {
   return null;
 }
 
-function showStatus(active, price) {
+function showStatus(active, price, ohlc) {
   let indicator = document.getElementById('lh-bridge-status');
   if (!indicator) {
     indicator = document.createElement('div');
@@ -75,7 +109,7 @@ function showStatus(active, price) {
   }
   if (active) {
     indicator.style.borderColor = '#0d9488';
-    indicator.textContent = `● LH ${price ? price.toFixed(0) : '...'}`;
+    indicator.textContent = `● LH ${price ? price.toFixed(0) : '...'}${ohlc ? ' ⬲OHLC' : ''}`;
   } else {
     indicator.style.borderColor = '#3f3f46';
     indicator.textContent = '○ LH (no price)';
@@ -84,16 +118,26 @@ function showStatus(active, price) {
 
 function poll() {
   const price = extractPrice();
+  const ohlc = extractOHLC();
   if (price !== null) {
     // Write to chrome.storage.local — writer.js on app page reads this
-    chrome.storage.local.set({
+    const payload = {
       lh_live_price: {
         price,
         timestamp: Date.now(),
         source: 'tradingview',
-      }
-    });
-    showStatus(true, price);
+      },
+    };
+    // Stream real OHLC of the current forming bar when the legend is readable.
+    if (ohlc) {
+      payload.lh_live_ohlc = {
+        ...ohlc,
+        timestamp: Date.now(),
+        source: 'tradingview',
+      };
+    }
+    chrome.storage.local.set(payload);
+    showStatus(true, price, !!ohlc);
   } else {
     showStatus(false);
   }

@@ -8,12 +8,17 @@
  */
 
 const STORAGE_KEY = 'lh_live_price';
+const OHLC_KEY = 'lh_live_ohlc';
 
 function syncPrice() {
-  chrome.storage.local.get('lh_live_price', (result) => {
+  chrome.storage.local.get(['lh_live_price', 'lh_live_ohlc'], (result) => {
     if (chrome.runtime.lastError) return; // Extension context invalidated
     if (result && result.lh_live_price && result.lh_live_price.price > 0) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(result.lh_live_price));
+    }
+    // Mirror the real OHLC of the current forming bar when present.
+    if (result && result.lh_live_ohlc && result.lh_live_ohlc.close > 0) {
+      localStorage.setItem(OHLC_KEY, JSON.stringify(result.lh_live_ohlc));
     }
   });
 }

@@ -352,7 +352,7 @@ export default function LiquidityLadder() {
   const {
     getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive,
     displacements, watchingLevels, updateLevel, sessionLevelsState,
-    addLevel, removeLevel, priceStale, updateLastPrice,
+    addLevel, removeLevel, priceStale, updateLastPrice, liveOHLC,
   } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
@@ -512,14 +512,42 @@ export default function LiquidityLadder() {
   useEffect(() => { try { localStorage.setItem('lh_ladder_candle_opacity', String(candleOpacity)); } catch {} }, [candleOpacity]);
   useEffect(() => { try { localStorage.setItem('lh_ladder_candle_interval', String(candleInterval)); } catch {} }, [candleInterval]);
   const cycleCandleMode = useCallback(() => {
-    setCandleMode(m => (m === 'off' ? 'aligned' : m === 'aligned' ? 'tv' : 'off'));
+    // off → aligned (synthetic) → live (real OHLC from extension) → tv → off
+    setCandleMode(m => (m === 'off' ? 'aligned' : m === 'aligned' ? 'live' : m === 'live' ? 'tv' : 'off'));
   }, []);
 
-  // Synthesized OHLC bars from the tick buffer (only when in aligned mode).
-  const candles = useMemo(
-    () => (candleMode === 'aligned' ? synthesizeCandles(priceLine, candleInterval) : []),
-    [candleMode, priceLine, candleInterval]
-  );
+  // ── Live OHLC bar series (real bars streamed from the extension) ─────
+  // The extension gives the CURRENT forming bar each tick; we roll it into a
+  // series: update the in-progress bar, and start a new one when the interval
+  // bucket changes. Retained across renders in a ref, mirrored to state.
+  const liveBarsRef = useRef([]);
+  const [liveBars, setLiveBars] = useState([]);
+  useEffect(() => {
+    if (candleMode !== 'live' || !liveOHLC || !(liveOHLC.close > 0)) return;
+    const intervalMs = Math.max(1, candleInterval) * 1000;
+    const bucket = Math.floor((liveOHLC.timestamp || Date.now()) / intervalMs) * intervalMs;
+    const bars = liveBarsRef.current;
+    const last = bars[bars.length - 1];
+    const bar = {
+      time: bucket,
+      open: liveOHLC.open, high: liveOHLC.high, low: liveOHLC.low, close: liveOHLC.close,
+      isUp: liveOHLC.close >= liveOHLC.open,
+    };
+    if (last && last.time === bucket) {
+      bars[bars.length - 1] = bar; // update the forming bar
+    } else {
+      bars.push(bar);              // new bar rolled over
+      if (bars.length > 60) liveBarsRef.current = bars.slice(-60);
+    }
+    setLiveBars([...liveBarsRef.current]);
+  }, [liveOHLC, candleMode, candleInterval]);
+
+  // The candle series to draw: synthesized in 'aligned', real in 'live'.
+  const candles = useMemo(() => {
+    if (candleMode === 'aligned') return synthesizeCandles(priceLine, candleInterval);
+    if (candleMode === 'live') return liveBars;
+    return [];
+  }, [candleMode, priceLine, candleInterval, liveBars]);
 
   // Active paper trades (broadcast by the Paper panel) → draggable stop/target
   // lines on the ladder, TradingView-style.
@@ -1349,8 +1377,8 @@ export default function LiquidityLadder() {
         </div>
       )}
 
-      {/* Candle overlay — synthesized OHLC aligned to the ladder's price axis */}
-      {candleMode === 'aligned' && candles.length > 1 && (
+      {/* Candle overlay — OHLC aligned to the ladder's price axis (aligned/live) */}
+      {(candleMode === 'aligned' || candleMode === 'live') && candles.length > 1 && (
         <svg className="absolute inset-0 top-5 bottom-5 w-full pointer-events-none z-[2]"
           viewBox="0 0 100 100" preserveAspectRatio="none"
           style={{ opacity: candleOpacity }}>
@@ -1381,11 +1409,19 @@ export default function LiquidityLadder() {
           })()}
         </svg>
       )}
-      {/* Aligned-candles label so it's never mistaken for a full market chart */}
-      {candleMode === 'aligned' && candles.length > 1 && (
+      {/* Candle label — 'synthetic' for aligned, 'live OHLC' for real bars */}
+      {(candleMode === 'aligned' || candleMode === 'live') && candles.length > 1 && (
         <div className="absolute bottom-6 left-1 z-[3] pointer-events-none">
           <span className="text-[7px] text-slate-500 font-mono bg-terminal-bg/70 px-1 rounded">
-            🕯 aligned · {candleInterval}s · synthetic
+            🕯 {candleMode === 'live' ? `live OHLC · ${candleInterval}s` : `aligned · ${candleInterval}s · synthetic`}
+          </span>
+        </div>
+      )}
+      {/* Live mode selected but no OHLC arriving from the extension */}
+      {candleMode === 'live' && (!liveOHLC || candles.length < 2) && (
+        <div className="absolute bottom-6 left-1 z-[3] pointer-events-none">
+          <span className="text-[7px] text-amber-400/80 font-mono bg-terminal-bg/70 px-1 rounded">
+            🕯 live OHLC — waiting for extension… (needs TradingView legend)
           </span>
         </div>
       )}
@@ -1550,19 +1586,21 @@ export default function LiquidityLadder() {
           aria-label="Candle overlay mode" aria-pressed={candleMode !== 'off'}
           title={
             candleMode === 'off' ? 'Candles OFF — click for aligned (synthetic) candles'
-            : candleMode === 'aligned' ? 'Aligned candles ON (synthetic, drawn on the ladder axis) — click for TradingView overlay'
+            : candleMode === 'aligned' ? 'Aligned candles ON (synthetic, from the app tick buffer) — click for LIVE OHLC (real bars from the extension)'
+            : candleMode === 'live' ? 'Live OHLC ON (real bars streamed from TradingView via the extension) — click for TradingView overlay'
             : 'TradingView overlay ON (own axis, not aligned) — click to turn off'
           }
           className={cn(
             'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
             candleMode === 'aligned' ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
+            : candleMode === 'live' ? 'bg-cyan-500/25 border-cyan-400/60 text-cyan-200'
             : candleMode === 'tv' ? 'bg-orange-500/25 border-orange-400/60 text-orange-200'
             : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
           )}
         >
-          {candleMode === 'off' ? '🕯 candles' : candleMode === 'aligned' ? '🕯 aligned' : '🕯 TView'}
+          {candleMode === 'off' ? '🕯 candles' : candleMode === 'aligned' ? '🕯 aligned' : candleMode === 'live' ? '🕯 live' : '🕯 TView'}
         </button>
-        {candleMode === 'aligned' && (
+        {(candleMode === 'aligned' || candleMode === 'live') && (
           <select value={candleInterval}
             onChange={(e) => setCandleInterval(parseInt(e.target.value))}
             title="Candle interval"
