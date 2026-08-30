@@ -40,6 +40,50 @@ export default function PaperTradePanel() {
   // Persist trades
   useEffect(() => { savePaperTrades(trades); }, [trades]);
 
+  // ── Live P&L helpers ────────────────────────────────────────────────
+  // Unrealized P&L for an open trade at the current price (points + R).
+  const livePnL = (trade, price) => {
+    if (!price || price <= 0) return null;
+    const dir = trade.direction === 'long' ? 1 : -1;
+    const points = (price - trade.entry) * dir;
+    const riskPoints = Math.abs(trade.entry - trade.stop) || 1;
+    const r = points / riskPoints;
+    return { points, r };
+  };
+
+  // Auto-resolve open trades when the live price crosses stop or target.
+  // This is what makes it "live": with sim mode driving lastPrice, trades
+  // fill and close on their own, exactly like real execution.
+  useEffect(() => {
+    if (!lastPrice || lastPrice <= 0) return;
+    setTrades(prev => {
+      let changed = false;
+      const next = prev.map(t => {
+        if (t.result !== 'pending') return t;
+        const isLong = t.direction === 'long';
+        // Stop first (worst case), then target.
+        const hitStop = isLong ? lastPrice <= t.stop : lastPrice >= t.stop;
+        const hitTarget = isLong ? lastPrice >= t.target : lastPrice <= t.target;
+        if (hitStop) { changed = true; return { ...t, result: 'stop_hit', resolved: new Date().toISOString(), exitPrice: t.stop, auto: true }; }
+        if (hitTarget) { changed = true; return { ...t, result: 'target_hit', resolved: new Date().toISOString(), exitPrice: t.target, auto: true }; }
+        return t;
+      });
+      return changed ? next : prev;
+    });
+  }, [lastPrice]);
+
+  // Combined open (unrealized) P&L across all pending trades.
+  const openPnL = useMemo(() => {
+    const open = trades.filter(t => t.result === 'pending');
+    if (!open.length || !lastPrice) return null;
+    let points = 0, r = 0;
+    open.forEach(t => {
+      const p = livePnL(t, lastPrice);
+      if (p) { points += p.points; r += p.r; }
+    });
+    return { count: open.length, points, r };
+  }, [trades, lastPrice]);
+
   // Stats
   const stats = useMemo(() => {
     const completed = trades.filter(t => t.result !== 'pending');
@@ -144,6 +188,25 @@ export default function PaperTradePanel() {
           </div>
         )}
 
+        {/* Live open P&L — updates every tick while positions are open */}
+        {openPnL && (
+          <div className={cn('flex items-center justify-between px-2.5 py-1.5 rounded-lg border',
+            openPnL.points >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30')}>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+              <span className="text-[9px] uppercase tracking-wider text-zinc-400">Open P&L · {openPnL.count} live</span>
+            </div>
+            <div className="flex items-center gap-2 tabular-nums font-mono">
+              <span className={cn('text-sm font-bold', openPnL.points >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                {openPnL.points >= 0 ? '+' : ''}{openPnL.points.toFixed(2)} pts
+              </span>
+              <span className={cn('text-[10px]', openPnL.r >= 0 ? 'text-emerald-400/80' : 'text-red-400/80')}>
+                {openPnL.r >= 0 ? '+' : ''}{openPnL.r.toFixed(2)}R
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* New trade button / form */}
         {!showForm ? (
           <button onClick={() => setShowForm(true)}
@@ -233,7 +296,9 @@ export default function PaperTradePanel() {
         {trades.filter(t => t.result === 'pending').length > 0 && (
           <div className="space-y-1.5">
             <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Pending</span>
-            {trades.filter(t => t.result === 'pending').map(trade => (
+            {trades.filter(t => t.result === 'pending').map(trade => {
+              const pnl = livePnL(trade, lastPrice);
+              return (
               <div key={trade.id} className="p-2 rounded border border-amber-500/20 bg-amber-500/5 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -242,13 +307,21 @@ export default function PaperTradePanel() {
                     </span>
                     {trade.levelType && <span className="text-[9px] text-zinc-500">{trade.levelType}</span>}
                   </div>
-                  <span className="text-[9px] text-zinc-600">{new Date(trade.created).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  {/* Live unrealized P&L */}
+                  {pnl ? (
+                    <span className={cn('text-[11px] font-bold tabular-nums font-mono', pnl.points >= 0 ? 'text-emerald-400' : 'text-red-400')}
+                      title="Live unrealized P&L">
+                      {pnl.points >= 0 ? '+' : ''}{pnl.points.toFixed(2)} pts · {pnl.r >= 0 ? '+' : ''}{pnl.r.toFixed(2)}R
+                    </span>
+                  ) : (
+                    <span className="text-[9px] text-zinc-600">awaiting price…</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 text-[9px] tabular-nums font-mono">
                   <span className="text-zinc-400">E: {trade.entry.toFixed(2)}</span>
                   <span className="text-red-400/70">S: {trade.stop.toFixed(2)}</span>
                   <span className="text-emerald-400/70">T: {trade.target.toFixed(2)}</span>
-                  <span className="text-zinc-500">R:R 1:{trade.rr}</span>
+                  {lastPrice > 0 && <span className="text-cyan-400">@ {lastPrice.toFixed(2)}</span>}
                 </div>
                 {trade.setupNotes && <p className="text-[9px] text-zinc-500 italic">{trade.setupNotes}</p>}
                 {/* Resolve buttons */}
@@ -260,7 +333,8 @@ export default function PaperTradePanel() {
                   <button onClick={() => deleteTrade(trade.id)} className="py-1 px-1.5 rounded text-[8px] text-zinc-600 hover:text-red-400">✕</button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
