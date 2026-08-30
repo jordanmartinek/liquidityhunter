@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useResearch } from '@/lib/researchStore';
 import { TV_SYMBOL_MAP } from '@/lib/constants';
 
-export default function TradingViewChart() {
+export default function TradingViewChart({ overlay = false, opacity = 1 }) {
   const { symbol } = useResearch();
   const containerRef = useRef(null);
   const widgetId = useRef(`tv_chart_${Date.now()}`);
@@ -39,9 +39,12 @@ export default function TradingViewChart() {
           locale: 'en',
           toolbar_bg: '#070b12',
           enable_publishing: false,
-          allow_symbol_change: true,
+          allow_symbol_change: !overlay,
           save_image: false,
-          hide_side_toolbar: false,
+          hide_side_toolbar: overlay ? true : false,
+          hide_top_toolbar: overlay ? true : false,
+          hide_legend: overlay ? true : false,
+          withdateranges: !overlay,
           drawings_access: { type: 'all' },
           studies: [],
           overrides: {
@@ -65,7 +68,20 @@ export default function TradingViewChart() {
         script.parentNode.removeChild(script);
       }
     };
-  }, [tvSymbol]);
+  }, [tvSymbol, overlay]);
+
+  // When used as a subtle overlay on the ladder: no border, click-through,
+  // and caller-controlled opacity.
+  if (overlay) {
+    return (
+      <div
+        className="w-full h-full"
+        style={{ opacity, pointerEvents: 'none' }}
+      >
+        <div ref={containerRef} className="w-full h-full" />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full relative rounded overflow-hidden border border-terminal-border">

@@ -22,6 +22,7 @@ import { requestPermission as requestNotifyPermission, sendNotification } from '
 import { alertZoneManager } from '@/lib/bangerFeatures';
 import { hasPatternManager } from '@/lib/headAndShoulders';
 import DailyRangeMeter from './DailyRangeMeter';
+import TradingViewChart from './TradingViewChart';
 import {
   sfpDetector,
   detectLiquidityVoids,
@@ -487,6 +488,17 @@ export default function LiquidityLadder() {
     };
   }, []);
   const PICK_LABELS = { entry: 'ENTRY', stop: 'STOP', target: 'TARGET (T1)', target2: 'TARGET 2', target3: 'TARGET 3' };
+
+  // Subtle candle overlay: a faint, click-through TradingView chart behind the
+  // ladder for ambient context (opacity adjustable). Off by default; persisted.
+  const [candlesOn, setCandlesOn] = useState(() => {
+    try { return localStorage.getItem('lh_ladder_candles') === 'on'; } catch { return false; }
+  });
+  const [candleOpacity, setCandleOpacity] = useState(() => {
+    try { const n = parseFloat(localStorage.getItem('lh_ladder_candle_opacity')); return n >= 0.05 && n <= 0.6 ? n : 0.15; } catch { return 0.15; }
+  });
+  useEffect(() => { try { localStorage.setItem('lh_ladder_candles', candlesOn ? 'on' : 'off'); } catch {} }, [candlesOn]);
+  useEffect(() => { try { localStorage.setItem('lh_ladder_candle_opacity', String(candleOpacity)); } catch {} }, [candleOpacity]);
 
   // Active paper trades (broadcast by the Paper panel) → draggable stop/target
   // lines on the ladder, TradingView-style.
@@ -1309,6 +1321,13 @@ export default function LiquidityLadder() {
         );
       })()}
 
+      {/* Subtle candle overlay — ambient TradingView chart behind the ladder */}
+      {candlesOn && (
+        <div className="absolute inset-0 z-0 pointer-events-none">
+          <TradingViewChart overlay opacity={candleOpacity} />
+        </div>
+      )}
+
       {/* Liquidity Gradient Heatmap background */}
       {effectiveLayers.heatmap && (
         <div className="absolute inset-0 pointer-events-none z-[1]"
@@ -1464,6 +1483,27 @@ export default function LiquidityLadder() {
         >
           {focusMode ? '🎯 focus on' : '🎯 focus'}
         </button>
+        <button
+          onClick={() => setCandlesOn(c => !c)}
+          aria-label="Toggle subtle candle overlay" aria-pressed={candlesOn}
+          title={candlesOn ? 'Candle overlay ON — faint chart behind the ladder. Click to hide.' : 'Show a faint candle chart behind the ladder for context'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            candlesOn
+              ? 'bg-orange-500/25 border-orange-400/60 text-orange-200'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          🕯 candles
+        </button>
+        {candlesOn && (
+          <input type="range" min="5" max="60" step="5"
+            value={Math.round(candleOpacity * 100)}
+            onChange={(e) => setCandleOpacity(parseInt(e.target.value) / 100)}
+            title={`Candle opacity: ${Math.round(candleOpacity * 100)}%`}
+            aria-label="Candle overlay opacity"
+            className="w-14 h-5 ml-1 accent-orange-400 cursor-pointer" />
+        )}
         <button
           onClick={toggleMeasure}
           aria-label="Measure tool" aria-pressed={measureMode}
