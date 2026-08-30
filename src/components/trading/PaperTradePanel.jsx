@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 const STORAGE_KEY = 'lh_paper_trades';
 const SIZE_KEY = 'lh_paper_size';
 const BALANCE_KEY = 'lh_paper_balance';
+const LIMIT_KEY = 'lh_paper_daily_limit';
 
 function loadPaperTrades() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
@@ -41,16 +42,28 @@ export default function PaperTradePanel() {
     try { const n = parseFloat(localStorage.getItem(BALANCE_KEY)); return n > 0 ? n : 10000; } catch { return 10000; }
   });
   useEffect(() => { try { localStorage.setItem(BALANCE_KEY, String(startBalance)); } catch {} }, [startBalance]);
+  // Daily loss limit ($). 0 = off. Persisted. When today's realized P&L hits
+  // -limit, new trades are blocked until reset.
+  const [dailyLimit, setDailyLimit] = useState(() => {
+    try { const n = parseFloat(localStorage.getItem(LIMIT_KEY)); return n >= 0 ? n : 0; } catch { return 0; }
+  });
+  useEffect(() => { try { localStorage.setItem(LIMIT_KEY, String(dailyLimit)); } catch {} }, [dailyLimit]);
+  // Manual override to lift the lockout (resume trading) for the current day.
+  const [lockoutCleared, setLockoutCleared] = useState(false);
   // $ per point for the active instrument (falls back to 1 if unknown).
   const pointValue = (INSTRUMENTS.find(i => i.symbol === symbol)?.point_value) || 1;
   const [form, setForm] = useState({
     direction: 'long',
     entry: '',
     stop: '',
-    target: '',
+    target: '',   // T1
+    target2: '',  // T2 (optional)
+    target3: '',  // T3 (optional)
     levelType: '',
     setupNotes: '',
   });
+  // Default scale-out plan across the targets that are set (auto-normalized).
+  const SCALE_PLAN = [0.5, 0.3, 0.2];
 
   // Persist trades
   useEffect(() => { savePaperTrades(trades); }, [trades]);
@@ -105,11 +118,36 @@ export default function PaperTradePanel() {
       const next = prev.map(t => {
         if (t.result !== 'pending') return t;
         const isLong = t.direction === 'long';
-        // Stop first (worst case), then target.
+        // Stop first (worst case).
         const hitStop = isLong ? lastPrice <= t.stop : lastPrice >= t.stop;
-        const hitTarget = isLong ? lastPrice >= t.target : lastPrice <= t.target;
         if (hitStop) { changed = true; return { ...t, result: 'stop_hit', resolved: new Date().toISOString(), exitPrice: t.stop, auto: true }; }
-        if (hitTarget) { changed = true; return { ...t, result: 'target_hit', resolved: new Date().toISOString(), exitPrice: t.target, auto: true }; }
+
+        // Laddered targets: auto scale-out at each un-hit target as price reaches it.
+        const targets = t.targets && t.targets.length ? t.targets : [{ price: t.target, pct: 1, hit: false }];
+        const totalQty = t.contracts || 1;
+        let working = t;
+        let mutated = false;
+        for (let i = 0; i < targets.length; i++) {
+          const tgt = targets[i];
+          if (tgt.hit) continue;
+          const reached = isLong ? lastPrice >= tgt.price : lastPrice <= tgt.price;
+          if (!reached) break; // targets are ordered; stop at first not-yet-reached
+          mutated = true;
+          const isFinal = i === targets.length - 1;
+          const alreadyOut = (working.scaleOuts || []).reduce((s, x) => s + x.qty, 0);
+          const remaining = totalQty - alreadyOut;
+          // Final target closes the remainder; intermediate scales its share.
+          const qty = isFinal ? remaining : Math.min(remaining, Math.max(1, Math.round(totalQty * tgt.pct)));
+          const newScaleOuts = [...(working.scaleOuts || []), { qty, price: tgt.price, time: new Date().toISOString(), target: i + 1 }];
+          const newTargets = working.targets ? working.targets.map((x, j) => j === i ? { ...x, hit: true } : x) : undefined;
+          if (isFinal || alreadyOut + qty >= totalQty) {
+            working = { ...working, scaleOuts: newScaleOuts, targets: newTargets, result: 'target_hit', resolved: new Date().toISOString(), exitPrice: tgt.price, auto: true };
+            break;
+          }
+          // Intermediate: bank the partial, move stop to breakeven on the runner.
+          working = { ...working, scaleOuts: newScaleOuts, targets: newTargets, stop: working.entry, movedToBE: true };
+        }
+        if (mutated) { changed = true; return working; }
         return t;
       });
       return changed ? next : prev;
@@ -206,21 +244,46 @@ export default function PaperTradePanel() {
     };
   }, [trades, startBalance]);
 
+  // Today's realized P&L (for the daily loss limit).
+  const todayRealized = useMemo(() => {
+    const today = new Date().toDateString();
+    return trades
+      .filter(t => t.result !== 'pending' && new Date(t.resolved || t.created).toDateString() === today)
+      .reduce((sum, t) => sum + realizedDollars(t), 0);
+  }, [trades]);
+  // Locked out when a positive limit is set and today's loss meets/exceeds it.
+  const lockedOut = dailyLimit > 0 && todayRealized <= -dailyLimit && !lockoutCleared;
+
   // Submit paper trade
   const handleSubmit = () => {
+    if (lockedOut) return; // daily loss limit hit — no new trades
     const entry = parseFloat(form.entry) || 0;
     const stop = parseFloat(form.stop) || 0;
-    const target = parseFloat(form.target) || 0;
-    if (!entry || !stop || !target) return;
+    const t1 = parseFloat(form.target) || 0;
+    if (!entry || !stop || !t1) return;
+
+    // Build the ordered target ladder (T1 required, T2/T3 optional).
+    const rawTargets = [t1, parseFloat(form.target2), parseFloat(form.target3)]
+      .filter(v => v && v > 0);
+    // Assign scale-out % from the default plan, normalized to the count set.
+    const plan = SCALE_PLAN.slice(0, rawTargets.length);
+    const planSum = plan.reduce((a, b) => a + b, 0);
+    const targets = rawTargets.map((price, i) => ({
+      price, pct: plan[i] / planSum, hit: false,
+    }));
+    const finalTarget = rawTargets[rawTargets.length - 1];
 
     const riskPoints = Math.abs(entry - stop);
-    const rewardPoints = Math.abs(target - entry);
+    const rewardPoints = Math.abs(finalTarget - entry);
     const rr = riskPoints > 0 ? parseFloat((rewardPoints / riskPoints).toFixed(2)) : 0;
 
     const trade = {
       id: Date.now().toString(),
       direction: form.direction,
-      entry, stop, target, rr,
+      entry, stop,
+      target: finalTarget,   // final target (for auto-resolve + display)
+      targets,               // laddered targets with scale-out %
+      rr,
       contracts: contracts || 1,
       pointValue,
       symbol,
@@ -232,7 +295,7 @@ export default function PaperTradePanel() {
     };
 
     setTrades(prev => [trade, ...prev]);
-    setForm({ direction: 'long', entry: '', stop: '', target: '', levelType: '', setupNotes: '' });
+    setForm({ direction: 'long', entry: '', stop: '', target: '', target2: '', target3: '', levelType: '', setupNotes: '' });
     setShowForm(false);
   };
 
@@ -274,6 +337,51 @@ export default function PaperTradePanel() {
     if (confirm('Clear all paper trades?')) { setTrades([]); }
   };
 
+  // Export the session (trades + summary) to a CSV download.
+  const exportCSV = () => {
+    const esc = (v) => {
+      const s = v == null ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [];
+    // Summary section
+    rows.push(['LiquidityHunter Paper Session']);
+    rows.push(['Exported', new Date().toISOString()]);
+    rows.push(['Symbol', symbol || '']);
+    rows.push(['Start Balance', startBalance]);
+    rows.push(['Account Value', equity.account.toFixed(2)]);
+    rows.push(['Realized P&L', equity.total.toFixed(2)]);
+    rows.push(['Return %', startBalance > 0 ? ((equity.total / startBalance) * 100).toFixed(2) : '0']);
+    rows.push(['Closed Trades', equity.count]);
+    rows.push(['Win Rate %', stats.winRate]);
+    rows.push(['Max Drawdown $', equity.maxDD.toFixed(2)]);
+    rows.push(['Max Drawdown %', equity.maxDDPct.toFixed(2)]);
+    rows.push(['Best Trade $', (equity.best || 0).toFixed(2)]);
+    rows.push(['Worst Trade $', (equity.worst || 0).toFixed(2)]);
+    rows.push([]);
+    // Trades section
+    const header = ['id', 'created', 'resolved', 'direction', 'symbol', 'entry', 'stop', 'targets', 'contracts', 'pointValue', 'result', 'scaleOuts', 'realized$', 'levelType', 'notes'];
+    rows.push(header);
+    trades.slice().sort((a, b) => new Date(a.created) - new Date(b.created)).forEach(t => {
+      const targetsStr = (t.targets && t.targets.length ? t.targets.map(x => x.price) : [t.target]).join(' / ');
+      const scaleStr = (t.scaleOuts || []).map(s => `${s.qty}@${s.price}`).join(' ');
+      const realized = t.result !== 'pending' ? realizedDollars(t).toFixed(2) : '';
+      rows.push([t.id, t.created, t.resolved || '', t.direction, t.symbol || symbol || '', t.entry, t.stop, targetsStr, t.contracts || 1, t.pointValue || pointValue, t.result, scaleStr, realized, t.levelType || '', t.setupNotes || '']);
+    });
+    const csv = rows.map(r => r.map(esc).join(',')).join('\n');
+    try {
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `paper-session-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {}
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -287,6 +395,7 @@ export default function PaperTradePanel() {
             showStats ? 'text-teal-400 bg-teal-500/10 border-teal-500/30' : 'text-zinc-500 border-zinc-700 hover:text-zinc-300')}>
             Stats
           </button>
+          {trades.length > 0 && <button onClick={exportCSV} title="Export session to CSV" className="text-[9px] text-zinc-500 hover:text-teal-400 px-1">⬇ CSV</button>}
           {trades.length > 0 && <button onClick={clearAll} className="text-[9px] text-zinc-600 hover:text-red-400 px-1">Clear</button>}
         </div>
       </div>
@@ -295,12 +404,16 @@ export default function PaperTradePanel() {
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {/* Account equity — running balance + realized session P&L */}
         <div className="flex items-center justify-between px-2.5 py-2 rounded-lg border border-zinc-800 bg-zinc-900/60">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-[9px] uppercase tracking-wider text-zinc-500">Account</span>
             <span className="text-[9px] text-zinc-600">start $</span>
             <input type="number" min="0" step="100" value={startBalance}
               onChange={(e) => setStartBalance(Math.max(0, parseFloat(e.target.value) || 0))}
               className="w-20 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+            <span className="text-[9px] text-zinc-600" title="Daily loss limit — 0 to disable">daily max loss $</span>
+            <input type="number" min="0" step="50" value={dailyLimit}
+              onChange={(e) => { setDailyLimit(Math.max(0, parseFloat(e.target.value) || 0)); setLockoutCleared(false); }}
+              className="w-16 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-red-400/50" />
           </div>
           <div className="text-right tabular-nums font-mono">
             <div className={cn('text-base font-bold', equity.account >= startBalance ? 'text-emerald-400' : 'text-red-400')}>
@@ -419,8 +532,25 @@ export default function PaperTradePanel() {
           </div>
         )}
 
+        {/* Daily loss limit lockout */}
+        {lockedOut && (
+          <div className="p-2.5 rounded-lg border border-red-500/50 bg-red-950/60 space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm">🛑</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-red-300">Daily loss limit hit</span>
+            </div>
+            <p className="text-[9px] text-red-200/80 leading-relaxed">
+              Today's realized P&L is <span className="font-mono font-bold">−${Math.abs(todayRealized).toFixed(0)}</span> vs your ${dailyLimit} limit. New trades are blocked — step away and protect the account.
+            </p>
+            <button onClick={() => setLockoutCleared(true)}
+              className="text-[9px] px-2 py-1 rounded bg-red-500/20 border border-red-500/40 text-red-200 hover:bg-red-500/30">
+              Override & resume today
+            </button>
+          </div>
+        )}
+
         {/* New trade button / form */}
-        {!showForm ? (
+        {lockedOut ? null : !showForm ? (
           <button onClick={() => setShowForm(true)}
             className="w-full py-2 rounded-md text-xs font-semibold bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 transition-all">
             + New Paper Trade
@@ -455,11 +585,33 @@ export default function PaperTradePanel() {
                   className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
               </div>
               <div>
-                <label className="text-[8px] text-zinc-500 uppercase">Target</label>
+                <label className="text-[8px] text-zinc-500 uppercase">T1</label>
                 <input type="number" step="0.01" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}
                   className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
               </div>
             </div>
+
+            {/* Optional T2 / T3 targets for auto scale-out */}
+            <div className="grid grid-cols-3 gap-1">
+              <div className="flex items-center">
+                <span className="text-[8px] text-zinc-600 uppercase">Scale plan →</span>
+              </div>
+              <div>
+                <label className="text-[8px] text-zinc-500 uppercase">T2 (opt)</label>
+                <input type="number" step="0.01" value={form.target2} onChange={(e) => setForm({ ...form, target2: e.target.value })}
+                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+              </div>
+              <div>
+                <label className="text-[8px] text-zinc-500 uppercase">T3 (opt)</label>
+                <input type="number" step="0.01" value={form.target3} onChange={(e) => setForm({ ...form, target3: e.target.value })}
+                  className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+              </div>
+            </div>
+            {(form.target2 || form.target3) && (
+              <div className="text-[8px] text-zinc-600 px-1">
+                Auto scale-out: {form.target3 ? '50% / 30% / 20% at T1/T2/T3' : '50% / 50% at T1/T2'} — stop → BE after T1
+              </div>
+            )}
 
             {/* Size + R:R + $ risk preview */}
             <div className="flex items-center gap-2 px-1">
@@ -544,7 +696,17 @@ export default function PaperTradePanel() {
                 <div className="flex items-center gap-3 text-[9px] tabular-nums font-mono">
                   <span className="text-zinc-400">E: {trade.entry.toFixed(2)}</span>
                   <span className="text-red-400/70">S: {trade.stop.toFixed(2)}</span>
-                  <span className="text-emerald-400/70">T: {trade.target.toFixed(2)}</span>
+                  {trade.targets && trade.targets.length > 1 ? (
+                    <span className="text-emerald-400/70">
+                      T: {trade.targets.map((tg, i) => (
+                        <span key={i} className={tg.hit ? 'line-through text-emerald-400' : ''}>
+                          {tg.price.toFixed(0)}{i < trade.targets.length - 1 ? '/' : ''}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-emerald-400/70">T: {trade.target.toFixed(2)}</span>
+                  )}
                   {lastPrice > 0 && <span className="text-cyan-400">@ {lastPrice.toFixed(2)}</span>}
                 </div>
                 {trade.setupNotes && <p className="text-[9px] text-zinc-500 italic">{trade.setupNotes}</p>}
