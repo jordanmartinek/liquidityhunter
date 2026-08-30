@@ -300,7 +300,8 @@ export default function PaperTradePanel() {
   // Submit paper trade
   const handleSubmit = () => {
     if (lockedOut) return; // daily loss limit hit — no new trades
-    const entry = parseFloat(form.entry) || 0;
+    // Entry defaults to the current (market) price if left blank.
+    const entry = parseFloat(form.entry) || lastPrice || 0;
     const stop = parseFloat(form.stop) || 0;
     const t1 = parseFloat(form.target) || 0;
     if (!entry || !stop || !t1) return;
@@ -594,9 +595,9 @@ export default function PaperTradePanel() {
 
         {/* New trade button / form */}
         {lockedOut ? null : !showForm ? (
-          <button onClick={() => setShowForm(true)}
+          <button onClick={() => { setForm(f => ({ ...f, entry: lastPrice > 0 ? lastPrice.toFixed(2) : '' })); setShowForm(true); }}
             className="w-full py-2 rounded-md text-xs font-semibold bg-purple-500/10 border border-purple-500/30 text-purple-400 hover:bg-purple-500/20 transition-all">
-            + New Paper Trade
+            + New Paper Trade{lastPrice > 0 ? ` @ ${lastPrice.toFixed(2)}` : ''}
           </button>
         ) : (
           <div className="space-y-2 p-2.5 bg-zinc-900/50 rounded-lg border border-purple-500/20">
@@ -621,8 +622,13 @@ export default function PaperTradePanel() {
                 <label className="text-[8px] text-zinc-500 uppercase">Entry</label>
                 <div className="flex gap-0.5">
                   <input type="number" step="0.01" value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })}
-                    placeholder={lastPrice > 0 ? lastPrice.toFixed(0) : '0'}
+                    placeholder={lastPrice > 0 ? `${lastPrice.toFixed(2)} (mkt)` : '0'}
                     className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, entry: lastPrice > 0 ? lastPrice.toFixed(2) : '' }))}
+                    disabled={lastPrice <= 0} title="Set entry to current market price"
+                    className="h-6 px-1 rounded text-[8px] border shrink-0 bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:text-emerald-300 hover:border-emerald-500/40 disabled:opacity-40">
+                    @mkt
+                  </button>
                   <PickBtn field="entry" />
                 </div>
               </div>
