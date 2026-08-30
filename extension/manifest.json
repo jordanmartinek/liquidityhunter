@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "LiquidityHunter Price Bridge",
-  "version": "1.3.0",
-  "description": "Streams live NAS100 price from TradingView to the LiquidityHunter app",
+  "version": "1.4.0",
+  "description": "Streams live price + OHLC from TradingView to the LiquidityHunter app",
   "permissions": ["storage"],
   "content_scripts": [
     {

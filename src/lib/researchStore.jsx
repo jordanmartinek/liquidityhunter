@@ -12,6 +12,7 @@ function getToday() {
 }
 
 const LIVE_PRICE_KEY = 'lh_live_price';
+const LIVE_OHLC_KEY = 'lh_live_ohlc';
 const LIVE_PRICE_STALE = 60000; // 60 seconds — forgiving for background tab throttling
 
 export function ResearchProvider({ children }) {
@@ -27,11 +28,26 @@ export function ResearchProvider({ children }) {
   // ─── Live Price Bridge ────────────────────────────────────────
   const [isLive, setIsLive] = useState(false);
   const [priceStale, setPriceStale] = useState(false);
+  // Real OHLC of the current forming bar, streamed by the extension (or null).
+  const [liveOHLC, setLiveOHLC] = useState(null);
   const lastPriceChangeRef = useRef(Date.now());
   const prevLivePriceRef = useRef(0);
 
   useEffect(() => {
+    function checkLiveOHLC() {
+      try {
+        const raw = localStorage.getItem(LIVE_OHLC_KEY);
+        if (!raw) { setLiveOHLC(null); return; }
+        const d = JSON.parse(raw);
+        if (Date.now() - d.timestamp < LIVE_PRICE_STALE && d.close > 0) {
+          setLiveOHLC({ open: d.open, high: d.high, low: d.low, close: d.close, timestamp: d.timestamp });
+        } else {
+          setLiveOHLC(null);
+        }
+      } catch { setLiveOHLC(null); }
+    }
     function checkLivePrice() {
+      checkLiveOHLC();
       try {
         const raw = localStorage.getItem(LIVE_PRICE_KEY);
         if (!raw) { setIsLive(false); return; }
@@ -341,6 +357,7 @@ export function ResearchProvider({ children }) {
     updateLastPrice,
     isLive,
     priceStale,
+    liveOHLC,
 
     // Timeframe
     activeTimeframe,
