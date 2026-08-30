@@ -68,6 +68,49 @@ export default function PaperTradePanel() {
   // Persist trades
   useEffect(() => { savePaperTrades(trades); }, [trades]);
 
+  // Broadcast the open (pending) trades to the ladder so it can draw and let
+  // you drag the stop / target lines directly (TradingView-style).
+  useEffect(() => {
+    const open = trades
+      .filter(t => t.result === 'pending')
+      .map(t => ({
+        id: t.id,
+        direction: t.direction,
+        entry: t.entry,
+        stop: t.stop,
+        targets: (t.targets && t.targets.length ? t.targets.map(x => x.price) : [t.target]).filter(Boolean),
+      }));
+    window.__lhActiveTrades = open;
+    try { window.dispatchEvent(new CustomEvent('lh:active-trades', { detail: open })); } catch {}
+  }, [trades]);
+
+  // Apply a stop/target change dragged on the ladder.
+  useEffect(() => {
+    const onUpdate = (e) => {
+      const { tradeId, field, price } = e.detail || {};
+      if (!tradeId || price == null || price <= 0) return;
+      setTrades(prev => prev.map(t => {
+        if (t.id !== tradeId || t.result !== 'pending') return t;
+        if (field === 'stop') return { ...t, stop: price };
+        // field like 'target0' / 'target1' / 'target2' → the Nth target
+        const m = /^target(\d+)$/.exec(field);
+        if (m) {
+          const idx = parseInt(m[1], 10);
+          if (t.targets && t.targets.length) {
+            const targets = t.targets.map((x, i) => i === idx ? { ...x, price } : x);
+            const finalTarget = targets[targets.length - 1].price;
+            return { ...t, targets, target: finalTarget };
+          }
+          // single-target legacy trade
+          return { ...t, target: price };
+        }
+        return t;
+      }));
+    };
+    window.addEventListener('lh:update-trade-level', onUpdate);
+    return () => window.removeEventListener('lh:update-trade-level', onUpdate);
+  }, []);
+
   // Prefill the form when a ladder level is sent over via "Paper trade this level".
   const applyPrefill = (d) => {
     if (!d) return;

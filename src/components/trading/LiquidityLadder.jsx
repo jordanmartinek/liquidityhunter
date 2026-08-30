@@ -488,6 +488,27 @@ export default function LiquidityLadder() {
   }, []);
   const PICK_LABELS = { entry: 'ENTRY', stop: 'STOP', target: 'TARGET (T1)', target2: 'TARGET 2', target3: 'TARGET 3' };
 
+  // Active paper trades (broadcast by the Paper panel) → draggable stop/target
+  // lines on the ladder, TradingView-style.
+  const [activeTrades, setActiveTrades] = useState(() => (typeof window !== 'undefined' && window.__lhActiveTrades) || []);
+  useEffect(() => {
+    const onTrades = (e) => setActiveTrades(e.detail || []);
+    window.addEventListener('lh:active-trades', onTrades);
+    if (window.__lhActiveTrades) setActiveTrades(window.__lhActiveTrades);
+    return () => window.removeEventListener('lh:active-trades', onTrades);
+  }, []);
+  // Which trade line is being dragged: { tradeId, field } + live Y.
+  const [dragTrade, setDragTrade] = useState(null);
+  const [dragTradeY, setDragTradeY] = useState(null);
+  const dragTradeRef = useRef(null);
+  useEffect(() => { dragTradeRef.current = dragTrade; }, [dragTrade]);
+  const startTradeLineDrag = useCallback((e, tradeId, field) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragTrade({ tradeId, field });
+    setDragTradeY(e.clientY);
+  }, []);
+
   // Alerts (sound + browser notifications). Both need a user gesture: sound to
   // unlock the AudioContext, notifications to grant permission.
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -833,6 +854,17 @@ export default function LiquidityLadder() {
     // Update the cursor crosshair (price readout) on every move
     updateCursor(e.clientY);
 
+    // Dragging a paper trade's stop/target line
+    if (dragTradeRef.current) {
+      setDragTradeY(e.clientY);
+      const res = clientYToPrice(e.clientY);
+      if (res) {
+        const s = maybeSnap(res.price, e);
+        setSnapHint(s.label ? { pct: res.pct, label: s.label } : null);
+      }
+      return;
+    }
+
     // Measure tool: extend the current measurement while dragging
     if (measureMode) {
       if (measuringRef.current) {
@@ -877,6 +909,25 @@ export default function LiquidityLadder() {
     setXPan(Math.max(0, Math.min(60, dragStartRef.current.xPanAtStart + xPanDelta)));
   };
   const handleMouseUp = (e) => {
+    // Finish dragging a paper trade's stop/target line → push the new price back.
+    if (dragTrade && dragTradeY !== null) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const viewPct = ((dragTradeY - rect.top) / rect.height) * 100;
+        const newPrice = maybeSnap(percentToPrice(viewPct), e).price;
+        if (newPrice > 0) {
+          try {
+            window.dispatchEvent(new CustomEvent('lh:update-trade-level', {
+              detail: { tradeId: dragTrade.tradeId, field: dragTrade.field, price: parseFloat(newPrice.toFixed(2)) },
+            }));
+          } catch {}
+        }
+      }
+      setDragTrade(null);
+      setDragTradeY(null);
+      setSnapHint(null);
+      return;
+    }
     // Measure tool: finish the drag but keep the measurement pinned on screen
     if (measureMode) {
       measuringRef.current = false;
@@ -1216,7 +1267,7 @@ export default function LiquidityLadder() {
       onDoubleClick={handleDoubleClick}
       onClick={closeContextMenu}
       style={{
-        cursor: (pickField || measureMode) ? 'crosshair' : dragEditLevel ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
+        cursor: (pickField || measureMode) ? 'crosshair' : (dragEditLevel || dragTrade) ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
         opacity: killZoneOpacity,
         transition: 'opacity 2s ease',
       }}
@@ -1886,6 +1937,43 @@ export default function LiquidityLadder() {
             </div>
           );
         })()}
+
+        {/* Paper trade lines — draggable stop/target (TradingView-style) */}
+        {activeTrades.map(tr => {
+          const rect = containerRef.current?.getBoundingClientRect();
+          // Y% for a line: follow the cursor while its own handle is dragging.
+          const dragPct = (field) => {
+            if (dragTrade && dragTrade.tradeId === tr.id && dragTrade.field === field && dragTradeY !== null && rect) {
+              return ((dragTradeY - rect.top) / rect.height) * 100;
+            }
+            return null;
+          };
+          const rows = [];
+          // Entry (reference only)
+          rows.push({ key: 'entry', price: tr.entry, pct: priceToPercent(tr.entry), color: 'border-slate-400/70', text: 'text-slate-300', label: 'ENTRY', draggable: false });
+          // Stop (draggable)
+          rows.push({ key: 'stop', field: 'stop', price: tr.stop, pct: dragPct('stop') ?? priceToPercent(tr.stop), color: 'border-red-400/80', text: 'text-red-300', label: 'SL', draggable: true });
+          // Targets (draggable)
+          (tr.targets || []).forEach((tp, i) => {
+            rows.push({ key: `t${i}`, field: `target${i}`, price: tp, pct: dragPct(`target${i}`) ?? priceToPercent(tp), color: 'border-emerald-400/80', text: 'text-emerald-300', label: `TP${i + 1}`, draggable: true });
+          });
+          return rows.map(r => (
+            <div key={`${tr.id}_${r.key}`} className="absolute left-0 right-0 flex items-center z-[16]"
+              style={{ top: `${r.pct}%`, transform: 'translateY(-50%)' }}>
+              <div className={cn('flex-1 border-t border-dashed', r.color)} />
+              <span
+                onMouseDown={r.draggable ? (e) => startTradeLineDrag(e, tr.id, r.field) : undefined}
+                className={cn('ml-1 text-[9px] font-mono font-bold px-1 py-0.5 rounded border bg-terminal-bg/90 whitespace-nowrap select-none',
+                  r.color, r.text, r.draggable ? 'cursor-ns-resize pointer-events-auto hover:brightness-125' : 'pointer-events-none')}
+                title={r.draggable ? `Drag to move ${r.label}` : r.label}>
+                {r.label} {(r.draggable && dragTrade && dragTrade.tradeId === tr.id && dragTrade.field === r.field
+                  ? percentToPrice(r.pct)
+                  : r.price).toFixed(2)}
+                {r.draggable && ' ⇕'}
+              </span>
+            </div>
+          ));
+        })}
 
         {/* Price Marker */}
         {priceMarkerPercent !== null && (
