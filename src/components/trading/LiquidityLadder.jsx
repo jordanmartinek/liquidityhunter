@@ -13,6 +13,7 @@ import {
   snapshotToPath,
   getTimeAtLevelPercent,
   formatTimeAtLevel,
+  synthesizeCandles,
 } from '@/lib/ladderAnalytics';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
@@ -489,16 +490,36 @@ export default function LiquidityLadder() {
   }, []);
   const PICK_LABELS = { entry: 'ENTRY', stop: 'STOP', target: 'TARGET (T1)', target2: 'TARGET 2', target3: 'TARGET 3' };
 
-  // Subtle candle overlay: a faint, click-through TradingView chart behind the
-  // ladder for ambient context (opacity adjustable). Off by default; persisted.
-  const [candlesOn, setCandlesOn] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_candles') === 'on'; } catch { return false; }
+  // Candle overlay modes:
+  //  'off'     — none
+  //  'aligned' — synthesized OHLC drawn on the ladder's own axis (approximate)
+  //  'tv'      — the faint TradingView widget (own axis, not aligned)
+  // Opacity adjustable. Persisted. Migrates the old boolean 'lh_ladder_candles'.
+  const [candleMode, setCandleMode] = useState(() => {
+    try {
+      const m = localStorage.getItem('lh_ladder_candle_mode');
+      if (m === 'off' || m === 'aligned' || m === 'tv') return m;
+      return localStorage.getItem('lh_ladder_candles') === 'on' ? 'tv' : 'off';
+    } catch { return 'off'; }
   });
   const [candleOpacity, setCandleOpacity] = useState(() => {
     try { const n = parseFloat(localStorage.getItem('lh_ladder_candle_opacity')); return n >= 0.05 && n <= 0.6 ? n : 0.15; } catch { return 0.15; }
   });
-  useEffect(() => { try { localStorage.setItem('lh_ladder_candles', candlesOn ? 'on' : 'off'); } catch {} }, [candlesOn]);
+  const [candleInterval, setCandleInterval] = useState(() => {
+    try { const n = parseInt(localStorage.getItem('lh_ladder_candle_interval')); return [15, 30, 60].includes(n) ? n : 30; } catch { return 30; }
+  });
+  useEffect(() => { try { localStorage.setItem('lh_ladder_candle_mode', candleMode); } catch {} }, [candleMode]);
   useEffect(() => { try { localStorage.setItem('lh_ladder_candle_opacity', String(candleOpacity)); } catch {} }, [candleOpacity]);
+  useEffect(() => { try { localStorage.setItem('lh_ladder_candle_interval', String(candleInterval)); } catch {} }, [candleInterval]);
+  const cycleCandleMode = useCallback(() => {
+    setCandleMode(m => (m === 'off' ? 'aligned' : m === 'aligned' ? 'tv' : 'off'));
+  }, []);
+
+  // Synthesized OHLC bars from the tick buffer (only when in aligned mode).
+  const candles = useMemo(
+    () => (candleMode === 'aligned' ? synthesizeCandles(priceLine, candleInterval) : []),
+    [candleMode, priceLine, candleInterval]
+  );
 
   // Active paper trades (broadcast by the Paper panel) → draggable stop/target
   // lines on the ladder, TradingView-style.
@@ -1321,10 +1342,51 @@ export default function LiquidityLadder() {
         );
       })()}
 
-      {/* Subtle candle overlay — ambient TradingView chart behind the ladder */}
-      {candlesOn && (
+      {/* Candle overlay — TradingView (not aligned) behind the ladder */}
+      {candleMode === 'tv' && (
         <div className="absolute inset-0 z-0 pointer-events-none">
           <TradingViewChart overlay opacity={candleOpacity} />
+        </div>
+      )}
+
+      {/* Candle overlay — synthesized OHLC aligned to the ladder's price axis */}
+      {candleMode === 'aligned' && candles.length > 1 && (
+        <svg className="absolute inset-0 top-5 bottom-5 w-full pointer-events-none z-[2]"
+          viewBox="0 0 100 100" preserveAspectRatio="none"
+          style={{ opacity: candleOpacity }}>
+          {(() => {
+            const plotWidth = Math.max(20, 100 - xPan);
+            const n = candles.length;
+            const slot = plotWidth / n;            // horizontal slot per bar
+            const bodyW = Math.max(0.6, slot * 0.6);
+            return candles.map((c, i) => {
+              const cx = (i + 0.5) * slot;          // center of the slot
+              const yO = priceToPercent(c.open);
+              const yC = priceToPercent(c.close);
+              const yH = priceToPercent(c.high);
+              const yL = priceToPercent(c.low);
+              const bodyTop = Math.min(yO, yC);
+              const bodyH = Math.max(0.3, Math.abs(yC - yO));
+              const stroke = c.isUp ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.9)';
+              const fill = c.isUp ? 'rgba(16,185,129,0.55)' : 'rgba(239,68,68,0.55)';
+              return (
+                <g key={c.time}>
+                  {/* wick */}
+                  <line x1={cx} x2={cx} y1={yH} y2={yL} stroke={stroke} strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+                  {/* body */}
+                  <rect x={cx - bodyW / 2} y={bodyTop} width={bodyW} height={bodyH} fill={fill} stroke={stroke} strokeWidth="0.2" vectorEffect="non-scaling-stroke" />
+                </g>
+              );
+            });
+          })()}
+        </svg>
+      )}
+      {/* Aligned-candles label so it's never mistaken for a full market chart */}
+      {candleMode === 'aligned' && candles.length > 1 && (
+        <div className="absolute bottom-6 left-1 z-[3] pointer-events-none">
+          <span className="text-[7px] text-slate-500 font-mono bg-terminal-bg/70 px-1 rounded">
+            🕯 aligned · {candleInterval}s · synthetic
+          </span>
         </div>
       )}
 
@@ -1484,19 +1546,34 @@ export default function LiquidityLadder() {
           {focusMode ? '🎯 focus on' : '🎯 focus'}
         </button>
         <button
-          onClick={() => setCandlesOn(c => !c)}
-          aria-label="Toggle subtle candle overlay" aria-pressed={candlesOn}
-          title={candlesOn ? 'Candle overlay ON — faint chart behind the ladder. Click to hide.' : 'Show a faint candle chart behind the ladder for context'}
+          onClick={cycleCandleMode}
+          aria-label="Candle overlay mode" aria-pressed={candleMode !== 'off'}
+          title={
+            candleMode === 'off' ? 'Candles OFF — click for aligned (synthetic) candles'
+            : candleMode === 'aligned' ? 'Aligned candles ON (synthetic, drawn on the ladder axis) — click for TradingView overlay'
+            : 'TradingView overlay ON (own axis, not aligned) — click to turn off'
+          }
           className={cn(
             'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            candlesOn
-              ? 'bg-orange-500/25 border-orange-400/60 text-orange-200'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+            candleMode === 'aligned' ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
+            : candleMode === 'tv' ? 'bg-orange-500/25 border-orange-400/60 text-orange-200'
+            : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
           )}
         >
-          🕯 candles
+          {candleMode === 'off' ? '🕯 candles' : candleMode === 'aligned' ? '🕯 aligned' : '🕯 TView'}
         </button>
-        {candlesOn && (
+        {candleMode === 'aligned' && (
+          <select value={candleInterval}
+            onChange={(e) => setCandleInterval(parseInt(e.target.value))}
+            title="Candle interval"
+            aria-label="Candle interval"
+            className="h-5 ml-1 bg-terminal-surface border border-terminal-border rounded text-[8px] text-slate-300 focus:outline-none">
+            <option value={15}>15s</option>
+            <option value={30}>30s</option>
+            <option value={60}>60s</option>
+          </select>
+        )}
+        {candleMode !== 'off' && (
           <input type="range" min="5" max="60" step="5"
             value={Math.round(candleOpacity * 100)}
             onChange={(e) => setCandleOpacity(parseInt(e.target.value) / 100)}
