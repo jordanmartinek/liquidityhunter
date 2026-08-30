@@ -281,3 +281,49 @@ export function snapshotToPath(snapshot, width = 60, height = 20) {
   const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
   return { path, isUp: prices[prices.length - 1] >= prices[0] };
 }
+
+
+
+// ─── Synthesized OHLC candles from the tick buffer ──────────
+// The app only receives a single last-price per second, so we bucket the
+// ladder's priceLine ({price, time}) into fixed-interval OHLC bars. These are
+// APPROXIMATE (1 Hz, midpoint prices, ~5 min of history) — ambient context
+// drawn on the ladder's own axis, not a real market chart.
+export function synthesizeCandles(priceLine, intervalSec = 30, maxBars = 40) {
+  if (!priceLine || priceLine.length < 2) return [];
+  const intervalMs = Math.max(1, intervalSec) * 1000;
+  const bars = [];
+  let cur = null;
+
+  for (const pt of priceLine) {
+    if (!pt || pt.price <= 0 || !pt.time) continue;
+    const bucket = Math.floor(pt.time / intervalMs) * intervalMs;
+    if (!cur || cur.bucket !== bucket) {
+      if (cur) bars.push(cur);
+      cur = {
+        bucket,
+        time: bucket,
+        open: pt.price,
+        high: pt.price,
+        low: pt.price,
+        close: pt.price,
+      };
+    } else {
+      if (pt.price > cur.high) cur.high = pt.price;
+      if (pt.price < cur.low) cur.low = pt.price;
+      cur.close = pt.price;
+    }
+  }
+  if (cur) bars.push(cur);
+
+  // Keep the most recent bars only.
+  const trimmed = bars.slice(-maxBars);
+  return trimmed.map(b => ({
+    time: b.time,
+    open: b.open,
+    high: b.high,
+    low: b.low,
+    close: b.close,
+    isUp: b.close >= b.open,
+  }));
+}
