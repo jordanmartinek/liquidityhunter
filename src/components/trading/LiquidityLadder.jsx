@@ -616,6 +616,13 @@ export default function LiquidityLadder() {
   const [soundOn, setSoundOn] = useState(() => {
     try { return ladderAudio.isEnabled(); } catch { return false; }
   });
+  const [soundVol, setSoundVol] = useState(() => {
+    try { return Math.round((ladderAudio.getVolume?.() ?? 0.3) * 100); } catch { return 30; }
+  });
+  const changeSoundVol = useCallback((pct) => {
+    setSoundVol(pct);
+    try { ladderAudio.setVolume?.(pct / 100); } catch {}
+  }, []);
   const [notifyOn, setNotifyOn] = useState(() => {
     try { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; } catch { return false; }
   });
@@ -1730,6 +1737,16 @@ export default function LiquidityLadder() {
             <input type="checkbox" checked={soundOn} onChange={toggleSound} className="accent-emerald-400 w-3 h-3" />
             🔊 Sound cues
           </label>
+          {soundOn && (
+            <div className="flex items-center gap-1.5 py-0.5 pl-4">
+              <span className="text-[8px] text-slate-500">vol</span>
+              <input type="range" min="0" max="100" step="5" value={soundVol}
+                onChange={(e) => changeSoundVol(parseInt(e.target.value))}
+                aria-label="Sound volume"
+                className="flex-1 h-4 accent-emerald-400 cursor-pointer" />
+              <span className="text-[8px] text-slate-500 tabular-nums w-6 text-right">{soundVol}%</span>
+            </div>
+          )}
           <div className="flex items-center justify-between py-0.5 text-[9px] text-slate-300">
             <span>🔔 Notifications</span>
             {notifyOn
