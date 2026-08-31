@@ -14,6 +14,9 @@ import {
   getTimeAtLevelPercent,
   formatTimeAtLevel,
   synthesizeCandles,
+  detectEqualHighsLows,
+  computeConfluence,
+  findHTFCorroboration,
 } from '@/lib/ladderAnalytics';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
@@ -86,7 +89,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf, comfortable, sweepReaction,
+  blurEnabled, whatIf, comfortable, sweepReaction, confluence,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -214,6 +217,15 @@ function Rung({
           {/* SFP badge */}
           {hasSFP && !isSwept && (
             <span className="text-[7px] mr-0.5 animate-pulse" title="Swing Failure Pattern detected">🔄</span>
+          )}
+          {/* Confluence score — how many factors stack (2+ shown; 4+ = A+) */}
+          {!isSwept && confluence && confluence.score >= 2 && (
+            <span className={cn('text-[7px] mr-0.5 font-bold px-0.5 rounded-sm',
+              confluence.score >= 4 ? 'bg-yellow-400/25 text-yellow-300'
+              : confluence.score === 3 ? 'text-amber-300' : 'text-slate-300')}
+              title={`Confluence ${confluence.score}: ${confluence.reasons.join(', ')}${confluence.score >= 4 ? ' — A+ setup' : ''}`}>
+              {confluence.score >= 4 ? '★' : '✦'}{confluence.score}
+            </span>
           )}
           {/* Sweep → reaction tag (on swept levels) */}
           {isSwept && sweepReaction && (
@@ -393,6 +405,7 @@ export default function LiquidityLadder() {
   // as reversal / continuation / chop. { id, status, levelName, levelPrice, movePts }
   const [sweepOutcome, setSweepOutcome] = useState(null);
   const seenReactionsRef = useRef({}); // levelId -> status already announced
+  const approachRef = useRef({}); // levelId -> true while price is within the approach band (fire-once)
   const [liquidityVoids, setLiquidityVoids] = useState([]);
   const [openingRange, setOpeningRange] = useState(null);
   const [gravityWeights, setGravityWeights] = useState([]);
@@ -871,6 +884,25 @@ export default function LiquidityLadder() {
         if (notifyOnRef.current) { try { sendNotification('🔄 SFP Detected', body, 'lh_sfp'); } catch {} }
       }
     }
+
+    // Level-approach alert: ping once when price enters an unswept level's
+    // proximity band; reset when it leaves so it can fire again next approach.
+    const APPROACH_PTS = 5;
+    for (const lvl of curLevels) {
+      if (lvl.sweep_status === 'Swept') { approachRef.current[lvl.id] = false; continue; }
+      const near = Math.abs(lastPrice - lvl.price) <= APPROACH_PTS;
+      if (near && !approachRef.current[lvl.id]) {
+        approachRef.current[lvl.id] = true;
+        try { if (soundOnRef.current) { ladderAudio.init(); ladderAudio.proximity?.(lvl.id); } } catch {}
+        try {
+          if (notifyOnRef.current) {
+            sendNotification('🎯 Approaching level', `${lvl.name || lvl.pool_type} @ ${lvl.price.toFixed(2)}`, 'lh_approach');
+          }
+        } catch {}
+      } else if (!near && approachRef.current[lvl.id]) {
+        approachRef.current[lvl.id] = false; // moved away — re-arm
+      }
+    }
   }, [lastPrice]);
 
   // Zoom (scroll wheel)
@@ -1183,6 +1215,18 @@ export default function LiquidityLadder() {
 
   // #4: Magnet Zones
   const magnetZones = useMemo(() => calculateMagnetZones(filteredLevels), [filteredLevels]);
+
+  // Equal highs / lows (engineered liquidity clusters)
+  const equalHL = useMemo(() => detectEqualHighsLows(filteredLevels), [filteredLevels]);
+
+  // Confluence inputs: which levels sit in a cluster, and which are HTF-corroborated.
+  const clusteredIds = useMemo(() => {
+    const s = new Set();
+    magnetZones.forEach(z => z.levels.forEach(l => s.add(l.id)));
+    equalHL.forEach(c => c.levelIds.forEach(id => s.add(id)));
+    return s;
+  }, [magnetZones, equalHL]);
+  const htfCorroborated = useMemo(() => findHTFCorroboration(filteredLevels), [filteredLevels]);
 
   // ── What-If mode analysis ───────────────────────────────────────────
   // For a hypothetical price, compute which active levels would be swept and
@@ -1736,6 +1780,8 @@ export default function LiquidityLadder() {
             <div className="absolute left-0 right-0 pointer-events-none z-[2]"
               style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.abs(botPct - topPct)}%` }}>
               <div className="w-full h-full bg-pink-500/5 border-y border-pink-500/15" />
+              <span className="absolute -top-1.5 left-1 text-[6px] text-pink-300/70 font-mono">🌏 AsiaH {sessionLevelsState.asia.high.toFixed(0)}</span>
+              <span className="absolute -bottom-1.5 left-1 text-[6px] text-pink-300/70 font-mono">🌏 AsiaL {sessionLevelsState.asia.low.toFixed(0)}</span>
             </div>
           );
         })()
@@ -1748,6 +1794,8 @@ export default function LiquidityLadder() {
             <div className="absolute left-0 right-0 pointer-events-none z-[2]"
               style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.abs(botPct - topPct)}%` }}>
               <div className="w-full h-full bg-blue-500/5 border-y border-blue-500/15" />
+              <span className="absolute -top-1.5 left-1 text-[6px] text-blue-300/70 font-mono">🇬🇧 LonH {sessionLevelsState.london.high.toFixed(0)}</span>
+              <span className="absolute -bottom-1.5 left-1 text-[6px] text-blue-300/70 font-mono">🇬🇧 LonL {sessionLevelsState.london.low.toFixed(0)}</span>
             </div>
           );
         })()
@@ -1763,6 +1811,25 @@ export default function LiquidityLadder() {
             <div className="w-full h-full bg-amber-500/8 border border-amber-500/20 rounded-sm" />
             <span className="absolute -right-1 top-0 text-[6px] text-amber-400/60 font-mono">
               🧲{zone.levelCount}
+            </span>
+          </div>
+        );
+      })}
+
+      {/* Equal Highs / Lows — engineered liquidity clusters (same-side, near-equal) */}
+      {effectiveLayers.zones && equalHL.map(cl => {
+        const topPct = priceToPercent(cl.highPrice);
+        const botPct = priceToPercent(cl.lowPrice);
+        const c = cl.isBSL ? 'cyan' : 'orange';
+        return (
+          <div key={cl.id} className="absolute left-8 right-8 pointer-events-none z-[4]"
+            style={{ top: `${Math.min(topPct, botPct)}%`, height: `${Math.max(Math.abs(botPct - topPct), 1)}%`, transform: 'translateY(-0.5px)' }}>
+            <div className={cn('w-full h-full rounded-sm border-y-2 border-dashed',
+              cl.isBSL ? 'bg-cyan-500/10 border-cyan-400/60' : 'bg-orange-500/10 border-orange-400/60')} />
+            <span className={cn('absolute -left-1 -top-2 text-[7px] font-bold font-mono px-1 rounded bg-terminal-bg/80',
+              cl.isBSL ? 'text-cyan-300' : 'text-orange-300')}
+              title={`${cl.count} equal ${cl.isBSL ? 'highs' : 'lows'} — engineered liquidity`}>
+              ⚑ {cl.isBSL ? 'EQH' : 'EQL'}×{cl.count}
             </span>
           </div>
         );
@@ -1983,6 +2050,16 @@ export default function LiquidityLadder() {
           // Sweep→reaction tag (reversal / continuation / chop) for swept levels
           const sweepReaction = sweepReactions[level.id] || null;
 
+          // Confluence score (how many factors stack on this level)
+          const confluence = level.sweep_status !== 'Swept'
+            ? computeConfluence(level, {
+                inCluster: clusteredIds.has(level.id),
+                inKillZone: killZone.active,
+                sweepProb,
+                htfCorroborated: htfCorroborated.has(level.id),
+              })
+            : { score: 0, reasons: [] };
+
           return (
             <Rung
               key={level.id}
@@ -2008,6 +2085,7 @@ export default function LiquidityLadder() {
               whatIf={whatIf}
               comfortable={comfortable}
               sweepReaction={sweepReaction}
+              confluence={confluence}
             />
           );
         })}

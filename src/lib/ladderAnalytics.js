@@ -327,3 +327,87 @@ export function synthesizeCandles(priceLine, intervalSec = 30, maxBars = 40) {
     isUp: b.close >= b.open,
   }));
 }
+
+
+
+// ─── Equal Highs / Equal Lows (engineered liquidity) ───────
+// Two or more UNSWEPT levels of the SAME side sitting at nearly-equal prices
+// are "equal highs/lows" — engineered liquidity that price is strongly drawn
+// to. Tighter and side-specific vs magnet zones (which cluster any levels).
+export function detectEqualHighsLows(levels, tolerance = 8) {
+  const active = (levels || []).filter(l => l.sweep_status !== 'Swept' && l.price > 0);
+  const clusters = [];
+  const used = new Set();
+
+  for (const side of ['Buy-Side', 'Sell-Side']) {
+    const sameSide = active.filter(l => l.side === side).sort((a, b) => b.price - a.price);
+    for (let i = 0; i < sameSide.length; i++) {
+      if (used.has(sameSide[i].id)) continue;
+      const cluster = [sameSide[i]];
+      used.add(sameSide[i].id);
+      for (let j = i + 1; j < sameSide.length; j++) {
+        if (used.has(sameSide[j].id)) continue;
+        // Compare against the cluster anchor so all members are within tolerance.
+        if (Math.abs(sameSide[i].price - sameSide[j].price) <= tolerance) {
+          cluster.push(sameSide[j]);
+          used.add(sameSide[j].id);
+        }
+      }
+      if (cluster.length >= 2) {
+        const prices = cluster.map(l => l.price);
+        const highPrice = Math.max(...prices);
+        const lowPrice = Math.min(...prices);
+        const isBSL = side === 'Buy-Side';
+        clusters.push({
+          id: `eql_${cluster.map(l => l.id).join('_')}`,
+          side,
+          isBSL,
+          // "Equal Highs" for buy-side (highs above), "Equal Lows" for sell-side
+          kind: isBSL ? 'Equal Highs' : 'Equal Lows',
+          highPrice,
+          lowPrice,
+          midPrice: (highPrice + lowPrice) / 2,
+          count: cluster.length,
+          levelIds: cluster.map(l => l.id),
+        });
+      }
+    }
+  }
+  return clusters;
+}
+
+
+
+// ─── Confluence scoring + cross-timeframe corroboration ────
+// Ranks how many factors stack on a level (0–5+), for an at-a-glance "A+" read.
+// `ctx` supplies the surrounding facts so this stays a pure function:
+//   { inCluster, inKillZone, sweepProb, htfCorroborated, strength }
+export function computeConfluence(level, ctx = {}) {
+  let score = 0;
+  const reasons = [];
+  if (ctx.inCluster) { score += 1; reasons.push('cluster'); }
+  if (ctx.inKillZone) { score += 1; reasons.push('kill zone'); }
+  if ((ctx.sweepProb || 0) >= 60) { score += 1; reasons.push('high sweep %'); }
+  if ((level?.strength || 0) >= 4) { score += 1; reasons.push('strong level'); }
+  if (ctx.htfCorroborated) { score += 1; reasons.push('HTF aligned'); }
+  return { score, reasons };
+}
+
+// For each active level, find whether a HIGHER-timeframe level sits within
+// `tolerance` price — i.e. the level is corroborated on a higher timeframe.
+// Returns a Set of level ids that are HTF-corroborated.
+export function findHTFCorroboration(levels, tolerance = 10) {
+  const active = (levels || []).filter(l => l.sweep_status !== 'Swept' && l.price > 0);
+  const weightOf = (tf) => (TF_DEPTH[tf]?.weight ?? 3);
+  const corroborated = new Set();
+  for (const a of active) {
+    for (const b of active) {
+      if (a.id === b.id) continue;
+      if (Math.abs(a.price - b.price) <= tolerance && weightOf(b.timeframe) > weightOf(a.timeframe)) {
+        corroborated.add(a.id);
+        break;
+      }
+    }
+  }
+  return corroborated;
+}
