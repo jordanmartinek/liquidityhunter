@@ -1,8 +1,10 @@
 import React from 'react';
+import React from 'react';
 import { Crosshair, Mic, MicOff } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
 import { INSTRUMENTS } from '@/lib/constants';
+import { exportBackup, importBackupFromFile } from '@/lib/backup';
 
 /**
  * Parse a spoken price from voice transcript.
@@ -57,6 +59,26 @@ export default function TopBar() {
   const { symbol, setSymbol, lastPrice, updateLastPrice, currentDate, isLive, priceStale } = useResearch();
   const [priceInput, setPriceInput] = React.useState('');
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
+  const backupFileRef = React.useRef(null);
+
+  const handleExport = () => {
+    const n = exportBackup();
+    // brief confirmation without a blocking dialog
+    console.log(`[LH] Backed up ${n} keys`);
+  };
+  const handleImportFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!confirm('Restore from this backup? It will overwrite your current levels, trades, journal and settings, then reload.')) {
+      e.target.value = '';
+      return;
+    }
+    const { restored, error } = await importBackupFromFile(file);
+    e.target.value = '';
+    if (error) { alert('Restore failed: ' + error); return; }
+    alert(`Restored ${restored} items. Reloading…`);
+    window.location.reload();
+  };
 
   const handlePriceSubmit = (e) => {
     e.preventDefault();
@@ -171,8 +193,19 @@ export default function TopBar() {
       {/* Spacer */}
       <div className="flex-1" />
 
+      {/* Backup / Restore */}
+      <button onClick={handleExport} title="Back up all data (levels, trades, journal, settings) to a file"
+        className="text-[10px] px-1.5 py-1 rounded border border-terminal-border text-slate-500 hover:text-teal-400 hover:border-teal-500/40">
+        ⬇ Backup
+      </button>
+      <button onClick={() => backupFileRef.current?.click()} title="Restore from a backup file (overwrites current data)"
+        className="text-[10px] px-1.5 py-1 rounded border border-terminal-border text-slate-500 hover:text-amber-400 hover:border-amber-500/40">
+        ⬆ Restore
+      </button>
+      <input ref={backupFileRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
+
       {/* Date */}
-      <span className="text-xs text-slate-500">{displayDate}</span>
+      <span className="text-xs text-slate-500 ml-2">{displayDate}</span>
     </div>
   );
 }
