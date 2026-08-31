@@ -99,18 +99,24 @@ export default function TopBar() {
 
       <div className="w-px h-6 bg-terminal-border" />
 
-      {/* Instrument Switcher */}
-      <select
-        value={symbol}
-        onChange={(e) => setSymbol(e.target.value)}
-        className="bg-terminal-bg border border-terminal-border rounded px-2 py-1 text-xs font-semibold text-slate-200"
-      >
+      {/* Instrument quick-switch — one-click chips */}
+      <div className="flex items-center gap-0.5" role="group" aria-label="Instrument">
         {INSTRUMENTS.map((inst) => (
-          <option key={inst.symbol} value={inst.symbol}>
+          <button
+            key={inst.symbol}
+            onClick={() => setSymbol(inst.symbol)}
+            aria-pressed={symbol === inst.symbol}
+            title={inst.symbol}
+            className={`px-2 py-1 rounded text-xs font-semibold transition-colors border ${
+              symbol === inst.symbol
+                ? 'bg-accent-blue/20 border-accent-blue/50 text-white'
+                : 'bg-terminal-bg border-terminal-border text-slate-400 hover:text-slate-200'
+            }`}
+          >
             {inst.label}
-          </option>
+          </button>
         ))}
-      </select>
+      </div>
 
       {/* Last Price */}
       <div className="flex items-center gap-2">
