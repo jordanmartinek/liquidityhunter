@@ -364,7 +364,7 @@ export default function LiquidityLadder() {
   const {
     getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive,
     displacements, watchingLevels, updateLevel, sessionLevelsState,
-    addLevel, removeLevel, priceStale, updateLastPrice, liveOHLC,
+    addLevel, removeLevel, priceStale, updateLastPrice, liveOHLC, symbol,
   } = useResearch();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
