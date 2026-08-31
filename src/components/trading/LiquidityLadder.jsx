@@ -373,11 +373,37 @@ export default function LiquidityLadder() {
   const [priceLine, setPriceLine] = useState([]);
   const containerRef = useRef(null);
 
-  // Zoom & Pan state
-  const [zoom, setZoom] = useState(1);
-  const [panOffset, setPanOffset] = useState(0);
+  // Zoom & Pan state — persisted so navigating away to the chart and back
+  // (which unmounts/remounts this component) keeps your zoom/pan in place.
+  const [zoom, setZoom] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem('lh_ladder_zoom'));
+      return Number.isFinite(v) && v > 0 ? v : 1;
+    } catch { return 1; }
+  });
+  const [panOffset, setPanOffset] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem('lh_ladder_pan'));
+      return Number.isFinite(v) ? v : 0;
+    } catch { return 0; }
+  });
   // Horizontal pan: shifts the price line left (0 = flush right, higher = more empty space on the right)
-  const [xPan, setXPan] = useState(0);
+  const [xPan, setXPan] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem('lh_ladder_xpan'));
+      return Number.isFinite(v) ? v : 0;
+    } catch { return 0; }
+  });
+  // Persist zoom/pan on change (debounced via the browser's microtask batching).
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_zoom', String(zoom)); } catch {}
+  }, [zoom]);
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_pan', String(panOffset)); } catch {}
+  }, [panOffset]);
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_xpan', String(xPan)); } catch {}
+  }, [xPan]);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ y: 0, x: 0, panAtStart: 0, xPanAtStart: 0 });
   // Touch: pinch-to-zoom + long-press-to-open-context-menu bookkeeping
