@@ -1,5 +1,4 @@
 import React from 'react';
-import React from 'react';
 import { Crosshair, Mic, MicOff } from 'lucide-react';
 import { useResearch } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
