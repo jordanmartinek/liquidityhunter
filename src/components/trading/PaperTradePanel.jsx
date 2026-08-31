@@ -54,8 +54,27 @@ export default function PaperTradePanel() {
     try { const n = parseFloat(localStorage.getItem(LIMIT_KEY)); return n >= 0 ? n : 0; } catch { return 0; }
   });
   useEffect(() => { try { localStorage.setItem(LIMIT_KEY, String(dailyLimit)); } catch {} }, [dailyLimit]);
+  // Max drawdown limit ($ from account peak). 0 = off. Persisted.
+  const [maxDDLimit, setMaxDDLimit] = useState(() => {
+    try { const n = parseFloat(localStorage.getItem('lh_paper_maxdd')); return n >= 0 ? n : 0; } catch { return 0; }
+  });
+  useEffect(() => { try { localStorage.setItem('lh_paper_maxdd', String(maxDDLimit)); } catch {} }, [maxDDLimit]);
   // Manual override to lift the lockout (resume trading) for the current day.
   const [lockoutCleared, setLockoutCleared] = useState(false);
+
+  // Prop-firm rule presets — one click sets balance + daily loss + max DD.
+  const PROP_PRESETS = [
+    { id: 'apex50', label: 'Apex 50k', balance: 50000, daily: 0, maxDD: 2500 },
+    { id: 'topstep50', label: 'Topstep 50k', balance: 50000, daily: 1000, maxDD: 2000 },
+    { id: 'ftmo100', label: 'FTMO 100k', balance: 100000, daily: 5000, maxDD: 10000 },
+    { id: 'mff50', label: 'MyFF 50k', balance: 50000, daily: 1100, maxDD: 2500 },
+  ];
+  const applyPreset = (p) => {
+    setStartBalance(p.balance);
+    setDailyLimit(p.daily);
+    setMaxDDLimit(p.maxDD);
+    setLockoutCleared(false);
+  };
   // $ per point for the active instrument (falls back to 1 if unknown).
   const pointValue = (INSTRUMENTS.find(i => i.symbol === symbol)?.point_value) || 1;
   const [form, setForm] = useState({
@@ -66,8 +85,11 @@ export default function PaperTradePanel() {
     target2: '',  // T2 (optional)
     target3: '',  // T3 (optional)
     levelType: '',
+    grade: '',    // A / B / C setup grade (optional)
     setupNotes: '',
   });
+  // Journal history search filter.
+  const [search, setSearch] = useState('');
   // Default scale-out plan across the targets that are set (auto-normalized).
   const SCALE_PLAN = [0.5, 0.3, 0.2];
 
@@ -370,7 +392,10 @@ export default function PaperTradePanel() {
       .reduce((sum, t) => sum + realizedDollars(t), 0);
   }, [trades]);
   // Locked out when a positive limit is set and today's loss meets/exceeds it.
-  const lockedOut = dailyLimit > 0 && todayRealized <= -dailyLimit && !lockoutCleared;
+  const hitDaily = dailyLimit > 0 && todayRealized <= -dailyLimit;
+  const hitMaxDD = maxDDLimit > 0 && equity.maxDD >= maxDDLimit;
+  const lockedOut = (hitDaily || hitMaxDD) && !lockoutCleared;
+  const lockoutReason = hitMaxDD ? 'maxdd' : 'daily';
 
   // Submit paper trade
   const handleSubmit = () => {
@@ -407,6 +432,7 @@ export default function PaperTradePanel() {
       pointValue,
       symbol,
       levelType: form.levelType,
+      grade: form.grade,
       setupNotes: form.setupNotes,
       result: 'pending',
       created: new Date().toISOString(),
@@ -414,7 +440,7 @@ export default function PaperTradePanel() {
     };
 
     setTrades(prev => [trade, ...prev]);
-    setForm({ direction: 'long', entry: '', stop: '', target: '', target2: '', target3: '', levelType: '', setupNotes: '' });
+    setForm({ direction: 'long', entry: '', stop: '', target: '', target2: '', target3: '', levelType: '', grade: '', setupNotes: '' });
     setShowForm(false);
   };
 
@@ -479,13 +505,13 @@ export default function PaperTradePanel() {
     rows.push(['Worst Trade $', (equity.worst || 0).toFixed(2)]);
     rows.push([]);
     // Trades section
-    const header = ['id', 'created', 'resolved', 'direction', 'symbol', 'entry', 'stop', 'targets', 'contracts', 'pointValue', 'result', 'scaleOuts', 'realized$', 'levelType', 'notes'];
+    const header = ['id', 'created', 'resolved', 'direction', 'symbol', 'entry', 'stop', 'targets', 'contracts', 'pointValue', 'result', 'scaleOuts', 'realized$', 'grade', 'levelType', 'notes'];
     rows.push(header);
     trades.slice().sort((a, b) => new Date(a.created) - new Date(b.created)).forEach(t => {
       const targetsStr = (t.targets && t.targets.length ? t.targets.map(x => x.price) : [t.target]).join(' / ');
       const scaleStr = (t.scaleOuts || []).map(s => `${s.qty}@${s.price}`).join(' ');
       const realized = t.result !== 'pending' ? realizedDollars(t).toFixed(2) : '';
-      rows.push([t.id, t.created, t.resolved || '', t.direction, t.symbol || symbol || '', t.entry, t.stop, targetsStr, t.contracts || 1, t.pointValue || pointValue, t.result, scaleStr, realized, t.levelType || '', t.setupNotes || '']);
+      rows.push([t.id, t.created, t.resolved || '', t.direction, t.symbol || symbol || '', t.entry, t.stop, targetsStr, t.contracts || 1, t.pointValue || pointValue, t.result, scaleStr, realized, t.grade || '', t.levelType || '', t.setupNotes || '']);
     });
     const csv = rows.map(r => r.map(esc).join(',')).join('\n');
     try {
@@ -533,6 +559,10 @@ export default function PaperTradePanel() {
             <input type="number" min="0" step="50" value={dailyLimit}
               onChange={(e) => { setDailyLimit(Math.max(0, parseFloat(e.target.value) || 0)); setLockoutCleared(false); }}
               className="w-16 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-red-400/50" />
+            <span className="text-[9px] text-zinc-600" title="Max drawdown from account peak — 0 to disable">max DD $</span>
+            <input type="number" min="0" step="50" value={maxDDLimit}
+              onChange={(e) => { setMaxDDLimit(Math.max(0, parseFloat(e.target.value) || 0)); setLockoutCleared(false); }}
+              className="w-16 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-red-400/50" />
           </div>
           <div className="text-right tabular-nums font-mono">
             <div className={cn('text-base font-bold', equity.account >= startBalance ? 'text-emerald-400' : 'text-red-400')}>
@@ -544,6 +574,18 @@ export default function PaperTradePanel() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Prop-firm presets — one click sets balance + daily loss + max DD */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[8px] uppercase tracking-wider text-zinc-600">Preset</span>
+          {PROP_PRESETS.map(p => (
+            <button key={p.id} onClick={() => applyPreset(p)}
+              title={`${p.label}: $${p.balance.toLocaleString()} · daily −$${p.daily || 'off'} · maxDD −$${p.maxDD}`}
+              className="text-[9px] px-1.5 py-0.5 rounded border bg-zinc-800/60 border-zinc-700 text-zinc-300 hover:text-white hover:border-purple-500/40">
+              {p.label}
+            </button>
+          ))}
         </div>
 
         {/* Stats bar */}
@@ -656,10 +698,14 @@ export default function PaperTradePanel() {
           <div className="p-2.5 rounded-lg border border-red-500/50 bg-red-950/60 space-y-1.5">
             <div className="flex items-center gap-1.5">
               <span className="text-sm">🛑</span>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-red-300">Daily loss limit hit</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-red-300">
+                {lockoutReason === 'maxdd' ? 'Max drawdown hit' : 'Daily loss limit hit'}
+              </span>
             </div>
             <p className="text-[9px] text-red-200/80 leading-relaxed">
-              Today's realized P&L is <span className="font-mono font-bold">−${Math.abs(todayRealized).toFixed(0)}</span> vs your ${dailyLimit} limit. New trades are blocked — step away and protect the account.
+              {lockoutReason === 'maxdd'
+                ? <>Drawdown from peak is <span className="font-mono font-bold">−${Math.abs(equity.maxDD).toFixed(0)}</span> vs your ${maxDDLimit} max. New trades are blocked — protect the account.</>
+                : <>Today's realized P&L is <span className="font-mono font-bold">−${Math.abs(todayRealized).toFixed(0)}</span> vs your ${dailyLimit} limit. New trades are blocked — step away and protect the account.</>}
             </p>
             <button onClick={() => setLockoutCleared(true)}
               className="text-[9px] px-2 py-1 rounded bg-red-500/20 border border-red-500/40 text-red-200 hover:bg-red-500/30">
@@ -804,6 +850,22 @@ export default function PaperTradePanel() {
               <option value="Other">Other</option>
             </select>
 
+            {/* Setup grade A/B/C */}
+            <div className="flex items-center gap-1.5 px-1">
+              <span className="text-[8px] text-zinc-500 uppercase">Grade</span>
+              {['A', 'B', 'C'].map(g => (
+                <button key={g} type="button" onClick={() => setForm({ ...form, grade: form.grade === g ? '' : g })}
+                  className={cn('h-6 w-7 rounded text-[10px] font-bold border',
+                    form.grade === g
+                      ? (g === 'A' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                        : g === 'B' ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                        : 'bg-red-500/15 border-red-500/40 text-red-300')
+                      : 'bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:text-zinc-300')}>
+                  {g}
+                </button>
+              ))}
+            </div>
+
             {/* Notes */}
             <input value={form.setupNotes} onChange={(e) => setForm({ ...form, setupNotes: e.target.value })}
               placeholder="Quick note: what did you see?"
@@ -903,16 +965,32 @@ export default function PaperTradePanel() {
         )}
 
         {/* Completed trades */}
-        {trades.filter(t => t.result !== 'pending').length > 0 && (
+        {trades.filter(t => t.result !== 'pending').length > 0 && (() => {
+          const q = search.trim().toLowerCase();
+          const matches = (t) => !q || [t.levelType, t.setupNotes, t.grade, t.direction, t.result]
+            .some(v => (v || '').toString().toLowerCase().includes(q));
+          const history = trades.filter(t => t.result !== 'pending' && matches(t));
+          return (
           <div className="space-y-1.5">
-            <span className="text-[9px] text-zinc-500 uppercase tracking-wider">History ({trades.filter(t => t.result !== 'pending').length})</span>
-            {trades.filter(t => t.result !== 'pending').slice(0, 10).map(trade => {
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-zinc-500 uppercase tracking-wider">History ({history.length})</span>
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="🔍 search notes/setup/grade…"
+                className="flex-1 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[9px] text-zinc-300 focus:outline-none focus:border-purple-400/50" />
+            </div>
+            {history.slice(0, 20).map(trade => {
               const resultConfig = RESULTS.find(r => r.value === trade.result) || RESULTS[0];
               return (
                 <div key={trade.id} className={cn('flex items-center gap-2 px-2 py-1.5 rounded border', resultConfig.bg)}>
                   <span className={cn('text-[9px] font-bold', trade.direction === 'long' ? 'text-emerald-400' : 'text-red-400')}>
                     {trade.direction === 'long' ? '▲' : '▼'}
                   </span>
+                  {trade.grade && (
+                    <span className={cn('text-[8px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded-sm',
+                      trade.grade === 'A' ? 'bg-emerald-500/20 text-emerald-300'
+                      : trade.grade === 'B' ? 'bg-amber-500/20 text-amber-300'
+                      : 'bg-red-500/15 text-red-300')} title={`Grade ${trade.grade}`}>{trade.grade}</span>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] tabular-nums font-mono text-zinc-400">{trade.entry.toFixed(1)}</span>
@@ -920,14 +998,15 @@ export default function PaperTradePanel() {
                       {trade.result === 'target_hit' && <span className="text-[9px] text-emerald-400 tabular-nums">+{trade.rr}R</span>}
                       {(trade.result === 'stop_hit' || trade.result === 'vwap_break') && <span className="text-[9px] text-red-400 tabular-nums">-1R</span>}
                     </div>
-                    {trade.levelType && <span className="text-[8px] text-zinc-600">{trade.levelType}</span>}
+                    {(trade.levelType || trade.setupNotes) && <span className="text-[8px] text-zinc-600 truncate block">{trade.levelType}{trade.levelType && trade.setupNotes ? ' · ' : ''}{trade.setupNotes}</span>}
                   </div>
                   <button onClick={() => deleteTrade(trade.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-[9px]">✕</button>
                 </div>
               );
             })}
           </div>
-        )}
+          );
+        })()}
 
         {/* Empty state */}
         {trades.length === 0 && !showForm && (
