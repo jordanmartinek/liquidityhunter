@@ -531,10 +531,28 @@ export default function LiquidityLadder() {
 
   // ── Live OHLC bar series (real bars streamed from the extension) ─────
   // The extension gives the CURRENT forming bar each tick; we roll it into a
-  // series: update the in-progress bar, and start a new one when the interval
-  // bucket changes. Retained across renders in a ref, mirrored to state.
-  const liveBarsRef = useRef([]);
-  const [liveBars, setLiveBars] = useState([]);
+  // series: update the in-progress bar, start a new one when the interval
+  // bucket changes, and PERSIST it so the history survives a refresh and
+  // accumulates over the session (keyed by symbol + interval + day).
+  const OHLC_BARS_KEY = 'lh_live_bars';
+  const barsKeyFor = (sym, iv) => `${sym || 'NA'}_${iv}s_${new Date().toDateString()}`;
+  const loadBars = (sym, iv) => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(OHLC_BARS_KEY) || 'null');
+      if (raw && raw.key === barsKeyFor(sym, iv) && Array.isArray(raw.bars)) return raw.bars;
+    } catch {}
+    return [];
+  };
+  const liveBarsRef = useRef(loadBars(symbol, candleInterval));
+  const [liveBars, setLiveBars] = useState(liveBarsRef.current);
+
+  // When symbol or interval changes, reload the matching persisted buffer
+  // (bars of one interval/symbol aren't valid for another).
+  useEffect(() => {
+    liveBarsRef.current = loadBars(symbol, candleInterval);
+    setLiveBars(liveBarsRef.current);
+  }, [symbol, candleInterval]);
+
   useEffect(() => {
     if (candleMode !== 'live' || !liveOHLC || !(liveOHLC.close > 0)) return;
     const intervalMs = Math.max(1, candleInterval) * 1000;
@@ -550,10 +568,18 @@ export default function LiquidityLadder() {
       bars[bars.length - 1] = bar; // update the forming bar
     } else {
       bars.push(bar);              // new bar rolled over
-      if (bars.length > 60) liveBarsRef.current = bars.slice(-60);
+      if (bars.length > 240) liveBarsRef.current = bars.slice(-240);
     }
     setLiveBars([...liveBarsRef.current]);
-  }, [liveOHLC, candleMode, candleInterval]);
+    // Persist the buffer (throttled by nature — one write per tick is cheap
+    // for a small array; keyed so stale symbol/interval/day buffers are ignored).
+    try {
+      localStorage.setItem(OHLC_BARS_KEY, JSON.stringify({
+        key: barsKeyFor(symbol, candleInterval),
+        bars: liveBarsRef.current,
+      }));
+    } catch {}
+  }, [liveOHLC, candleMode, candleInterval, symbol]);
 
   // The candle series to draw: synthesized in 'aligned', real in 'live'.
   const candles = useMemo(() => {
