@@ -7,6 +7,7 @@ const STORAGE_KEY = 'lh_paper_trades';
 const SIZE_KEY = 'lh_paper_size';
 const BALANCE_KEY = 'lh_paper_balance';
 const LIMIT_KEY = 'lh_paper_daily_limit';
+const RISK_KEY = 'lh_paper_risk_pct';
 
 function loadPaperTrades() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
@@ -37,6 +38,11 @@ export default function PaperTradePanel() {
     try { const n = parseFloat(localStorage.getItem(SIZE_KEY)); return n > 0 ? n : 1; } catch { return 1; }
   });
   useEffect(() => { try { localStorage.setItem(SIZE_KEY, String(contracts)); } catch {} }, [contracts]);
+  // Risk % of account for auto position-sizing. Persisted.
+  const [riskPct, setRiskPct] = useState(() => {
+    try { const n = parseFloat(localStorage.getItem(RISK_KEY)); return n > 0 && n <= 100 ? n : 1; } catch { return 1; }
+  });
+  useEffect(() => { try { localStorage.setItem(RISK_KEY, String(riskPct)); } catch {} }, [riskPct]);
   // Starting account balance for equity tracking. Persisted.
   const [startBalance, setStartBalance] = useState(() => {
     try { const n = parseFloat(localStorage.getItem(BALANCE_KEY)); return n > 0 ? n : 10000; } catch { return 10000; }
@@ -65,6 +71,22 @@ export default function PaperTradePanel() {
   // Default scale-out plan across the targets that are set (auto-normalized).
   const SCALE_PLAN = [0.5, 0.3, 0.2];
 
+  // Auto position-sizing: contracts so that hitting the stop loses ~riskPct of
+  // the account. Needs a valid entry+stop and a positive balance.
+  const sizeFromRisk = () => {
+    const entry = parseFloat(form.entry) || lastPrice || 0;
+    const stop = parseFloat(form.stop) || 0;
+    const stopDist = Math.abs(entry - stop);
+    if (!entry || !stop || stopDist <= 0 || startBalance <= 0 || pointValue <= 0) return null;
+    const riskDollars = startBalance * (riskPct / 100);
+    const perContractRisk = stopDist * pointValue;
+    return Math.max(1, Math.floor(riskDollars / perContractRisk));
+  };
+  const applyAutoSize = () => {
+    const n = sizeFromRisk();
+    if (n) setContracts(n);
+  };
+
   // Persist trades
   useEffect(() => { savePaperTrades(trades); }, [trades]);
 
@@ -91,7 +113,17 @@ export default function PaperTradePanel() {
       if (!tradeId || price == null || price <= 0) return;
       setTrades(prev => prev.map(t => {
         if (t.id !== tradeId || t.result !== 'pending') return t;
-        if (field === 'stop') return { ...t, stop: price };
+        if (field === 'entry') {
+          // Moving entry re-bases R:R off the new entry.
+          const risk = Math.abs(price - t.stop) || 1;
+          const reward = Math.abs(t.target - price);
+          return { ...t, entry: price, rr: parseFloat((reward / risk).toFixed(2)) };
+        }
+        if (field === 'stop') {
+          const risk = Math.abs(t.entry - price) || 1;
+          const reward = Math.abs(t.target - t.entry);
+          return { ...t, stop: price, rr: parseFloat((reward / risk).toFixed(2)) };
+        }
         // field like 'target0' / 'target1' / 'target2' → the Nth target
         const m = /^target(\d+)$/.exec(field);
         if (m) {
@@ -733,6 +765,20 @@ export default function PaperTradePanel() {
                   risk −${(Math.abs(parseFloat(form.entry) - parseFloat(form.stop)) * pointValue * contracts).toFixed(0)}
                 </span>
               )}
+            </div>
+            {/* Auto position-sizing from % risk of the account */}
+            <div className="flex items-center gap-1.5 px-1">
+              <span className="text-[8px] text-zinc-500 uppercase">Risk</span>
+              <input type="number" min="0.1" step="0.1" value={riskPct}
+                onChange={(e) => setRiskPct(Math.max(0.1, Math.min(100, parseFloat(e.target.value) || 1)))}
+                className="w-12 h-6 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 tabular-nums focus:outline-none focus:border-purple-400/50" />
+              <span className="text-[8px] text-zinc-600">% of ${startBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              <button type="button" onClick={applyAutoSize}
+                disabled={!(sizeFromRisk() > 0)}
+                title={sizeFromRisk() ? `Auto-size to ${sizeFromRisk()} contract(s) for ${riskPct}% risk` : 'Set entry & stop first'}
+                className="ml-auto h-6 px-1.5 rounded text-[8px] border bg-emerald-500/10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed">
+                ⚖ auto{sizeFromRisk() ? ` → ${sizeFromRisk()}` : ''}
+              </button>
             </div>
             {form.entry && form.stop && form.target && (
               <div className="flex justify-between text-[9px] px-1">

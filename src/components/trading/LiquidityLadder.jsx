@@ -2103,31 +2103,44 @@ export default function LiquidityLadder() {
             }
             return null;
           };
+          const dir = tr.direction === 'long' ? 1 : -1;
+          const riskDist = Math.abs(tr.entry - tr.stop) || 1;
+          // R multiple of an arbitrary price vs this trade's entry/risk.
+          const rOf = (price) => ((price - tr.entry) * dir) / riskDist;
+          // Live unrealized P&L on the entry line.
+          const livePts = lastPrice > 0 ? (lastPrice - tr.entry) * dir : null;
+          const liveR = livePts != null ? livePts / riskDist : null;
+
           const rows = [];
-          // Entry (reference only)
-          rows.push({ key: 'entry', price: tr.entry, pct: priceToPercent(tr.entry), color: 'border-slate-400/70', text: 'text-slate-300', label: 'ENTRY', draggable: false });
-          // Stop (draggable)
-          rows.push({ key: 'stop', field: 'stop', price: tr.stop, pct: dragPct('stop') ?? priceToPercent(tr.stop), color: 'border-red-400/80', text: 'text-red-300', label: 'SL', draggable: true });
-          // Targets (draggable)
+          // Entry — shows live P&L / R
+          rows.push({ key: 'entry', field: 'entry', price: tr.entry, pct: dragPct('entry') ?? priceToPercent(tr.entry), color: 'border-slate-400/70', text: 'text-slate-300', label: 'ENTRY', draggable: true, extra: (liveR != null ? `  ${livePts >= 0 ? '+' : ''}${livePts.toFixed(1)}pt · ${liveR >= 0 ? '+' : ''}${liveR.toFixed(2)}R` : '') });
+          // Stop — shows -1R
+          rows.push({ key: 'stop', field: 'stop', price: tr.stop, pct: dragPct('stop') ?? priceToPercent(tr.stop), color: 'border-red-400/80', text: 'text-red-300', label: 'SL', draggable: true, extra: '  −1.0R' });
+          // Targets — show the R reward at each
           (tr.targets || []).forEach((tp, i) => {
-            rows.push({ key: `t${i}`, field: `target${i}`, price: tp, pct: dragPct(`target${i}`) ?? priceToPercent(tp), color: 'border-emerald-400/80', text: 'text-emerald-300', label: `TP${i + 1}`, draggable: true });
+            rows.push({ key: `t${i}`, field: `target${i}`, price: tp, pct: dragPct(`target${i}`) ?? priceToPercent(tp), color: 'border-emerald-400/80', text: 'text-emerald-300', label: `TP${i + 1}`, draggable: true, extra: `  +${rOf(tp).toFixed(2)}R` });
           });
-          return rows.map(r => (
-            <div key={`${tr.id}_${r.key}`} className="absolute left-0 right-0 flex items-center z-[16]"
-              style={{ top: `${r.pct}%`, transform: 'translateY(-50%)' }}>
-              <div className={cn('flex-1 border-t border-dashed', r.color)} />
-              <span
-                onMouseDown={r.draggable ? (e) => startTradeLineDrag(e, tr.id, r.field) : undefined}
-                className={cn('ml-1 text-[9px] font-mono font-bold px-1 py-0.5 rounded border bg-terminal-bg/90 whitespace-nowrap select-none',
-                  r.color, r.text, r.draggable ? 'cursor-ns-resize pointer-events-auto hover:brightness-125' : 'pointer-events-none')}
-                title={r.draggable ? `Drag to move ${r.label}` : r.label}>
-                {r.label} {(r.draggable && dragTrade && dragTrade.tradeId === tr.id && dragTrade.field === r.field
-                  ? percentToPrice(r.pct)
-                  : r.price).toFixed(2)}
-                {r.draggable && ' ⇕'}
-              </span>
-            </div>
-          ));
+          return rows.map(r => {
+            // While dragging this row, recompute its live price + R from the cursor.
+            const isDraggingThis = r.draggable && dragTrade && dragTrade.tradeId === tr.id && dragTrade.field === r.field;
+            const shownPrice = isDraggingThis ? percentToPrice(r.pct) : r.price;
+            const shownExtra = isDraggingThis
+              ? `  ${rOf(shownPrice) >= 0 ? '+' : ''}${rOf(shownPrice).toFixed(2)}R`
+              : r.extra;
+            return (
+              <div key={`${tr.id}_${r.key}`} className="absolute left-0 right-0 flex items-center z-[16]"
+                style={{ top: `${r.pct}%`, transform: 'translateY(-50%)' }}>
+                <div className={cn('flex-1 border-t border-dashed', r.color)} />
+                <span
+                  onMouseDown={r.draggable ? (e) => startTradeLineDrag(e, tr.id, r.field) : undefined}
+                  className={cn('ml-1 text-[9px] font-mono font-bold px-1 py-0.5 rounded border bg-terminal-bg/90 whitespace-nowrap select-none',
+                    r.color, r.text, r.draggable ? 'cursor-ns-resize pointer-events-auto hover:brightness-125' : 'pointer-events-none')}
+                  title={r.draggable ? `Drag to move ${r.label}` : r.label}>
+                  {r.label} {shownPrice.toFixed(2)}{shownExtra}{r.draggable && ' ⇕'}
+                </span>
+              </div>
+            );
+          });
         })}
 
         {/* Price Marker */}
