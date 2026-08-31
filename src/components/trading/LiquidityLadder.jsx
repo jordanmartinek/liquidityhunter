@@ -562,6 +562,7 @@ export default function LiquidityLadder() {
     const bar = {
       time: bucket,
       open: liveOHLC.open, high: liveOHLC.high, low: liveOHLC.low, close: liveOHLC.close,
+      volume: liveOHLC.volume ?? null,
       isUp: liveOHLC.close >= liveOHLC.open,
     };
     if (last && last.time === bucket) {

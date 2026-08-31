@@ -40,7 +40,7 @@ export function ResearchProvider({ children }) {
         if (!raw) { setLiveOHLC(null); return; }
         const d = JSON.parse(raw);
         if (Date.now() - d.timestamp < LIVE_PRICE_STALE && d.close > 0) {
-          setLiveOHLC({ open: d.open, high: d.high, low: d.low, close: d.close, timestamp: d.timestamp });
+          setLiveOHLC({ open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume ?? null, timestamp: d.timestamp });
         } else {
           setLiveOHLC(null);
         }

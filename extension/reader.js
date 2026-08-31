@@ -25,11 +25,13 @@ function parseNum(text) {
 // internally consistent (High ≥ max(O,C), Low ≤ min(O,C), sane range).
 function extractOHLC() {
   const cells = document.querySelectorAll('[class*="valueValue"]');
+  // Collect a handful of leading numeric cells (O,H,L,C then possibly a dup
+  // close + volume). We only *require* the first four.
   const nums = [];
   for (const el of cells) {
     const n = parseNum(el.textContent.trim());
     if (n !== null) nums.push(n);
-    if (nums.length >= 4) break; // O/H/L/C are the first four numeric cells
+    if (nums.length >= 8) break;
   }
   if (nums.length < 4) return null;
   const [open, high, low, close] = nums;
@@ -39,7 +41,15 @@ function extractOHLC() {
   if (high < Math.max(open, close) - 0.01) return null;
   if (low > Math.min(open, close) + 0.01) return null;
   if (high < low) return null;
-  return { open, high, low, close };
+
+  // Volume (optional): the first trailing numeric cell that is clearly NOT a
+  // price (outside the price band). TradingView shows it right after OHLC.
+  let volume = null;
+  for (let i = 4; i < nums.length; i++) {
+    const v = nums[i];
+    if (v > 0 && !inRange(v)) { volume = v; break; }
+  }
+  return { open, high, low, close, volume };
 }
 
 function extractPrice() {
@@ -111,10 +121,14 @@ function showStatus(active, price, ohlc) {
     indicator.style.borderColor = '#0d9488';
     indicator.textContent = `● LH ${price ? price.toFixed(0) : '...'}${ohlc ? ' ⬲OHLC' : ''}`;
   } else {
-    indicator.style.borderColor = '#3f3f46';
-    indicator.textContent = '○ LH (no price)';
+    indicator.style.borderColor = '#b45309';
+    indicator.textContent = '⚠ LH — no price (check chart/legend)';
   }
 }
+
+// Track consecutive read failures so we can warn instead of silently dying if
+// TradingView changes its DOM.
+let missStreak = 0;
 
 function poll() {
   const price = extractPrice();
@@ -128,7 +142,7 @@ function poll() {
         source: 'tradingview',
       },
     };
-    // Stream real OHLC of the current forming bar when the legend is readable.
+    // Stream real OHLC (+ optional volume) of the current forming bar.
     if (ohlc) {
       payload.lh_live_ohlc = {
         ...ohlc,
@@ -137,9 +151,16 @@ function poll() {
       };
     }
     chrome.storage.local.set(payload);
+    missStreak = 0;
     showStatus(true, price, !!ohlc);
   } else {
+    // Resilience: after several consecutive misses, surface a clear warning
+    // (likely the chart isn't loaded, or TradingView changed its DOM).
+    missStreak++;
     showStatus(false);
+    if (missStreak === 10) {
+      console.warn('[LH Bridge] No price for ~10s — is a chart open with the price/legend visible? TradingView DOM may have changed.');
+    }
   }
 }
 
