@@ -1,95 +1,124 @@
 // Service Worker for LiquidityHunter — full offline support
-const CACHE_NAME = 'liqhunter-v5';
+// v6: fixes stale-bundle crashes. HTML/build assets are served network-first
+// and never served stale while online, so a deploy always reaches the user.
+const CACHE_NAME = 'liqhunter-v6';
 
-// Core app shell to cache on install
+// Core app shell to cache on install (NOTE: index.html is intentionally NOT
+// pre-cached here — it is handled network-first in fetch so hashed bundle
+// references never go stale).
 const APP_SHELL = [
-  '/',
-  '/index.html',
   '/vite.svg',
   '/icon-192.svg',
   '/icon-512.svg',
   '/manifest.json',
 ];
 
-// Install — cache app shell
+// Install — cache app shell, take over immediately
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(APP_SHELL);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
   );
   self.skipWaiting();
 });
 
-// Activate — clean old caches
+// Activate — purge ALL old caches (this is what clears a stale bundle), claim clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-      );
-    })
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch — cache-first for app assets, network-first for API/external
+// Is this a request for the HTML document or a hashed build asset?
+// These must always come from the network when online so new deploys apply.
+function isFreshnessCritical(url, request) {
+  if (request.mode === 'navigate') return true;              // page navigations
+  if (url.pathname === '/' || url.pathname === '/index.html') return true;
+  if (url.pathname.startsWith('/assets/')) return true;      // Vite hashed JS/CSS
+  return false;
+}
+
+// Fetch handler
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const { request } = event;
+  const url = new URL(request.url);
 
-  // Skip non-GET requests
-  if (event.request.method !== 'GET') return;
+  // Only handle GET
+  if (request.method !== 'GET') return;
 
-  // For TradingView scripts — network only (they need live data)
+  // TradingView scripts — network only (they need live data)
   if (url.hostname.includes('tradingview.com') || url.hostname.includes('s3.tradingview.com')) {
-    event.respondWith(
-      fetch(event.request).catch(() => new Response('', { status: 503 }))
-    );
+    event.respondWith(fetch(request).catch(() => new Response('', { status: 503 })));
     return;
   }
 
-  // For app assets — network first, fall back to cache
+  // Same-origin requests
   if (url.origin === self.location.origin) {
+    // HTML + hashed build assets: NETWORK FIRST, cache only as an offline fallback.
+    // Never serve a stale copy while the network succeeds — this prevents the
+    // "old bundle keeps running after a deploy" crash.
+    if (isFreshnessCritical(url, request)) {
+      event.respondWith(
+        fetch(request)
+          .then((response) => {
+            if (response && response.status === 200) {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+            }
+            return response;
+          })
+          .catch(() =>
+            caches.match(request).then((cached) => {
+              if (cached) return cached;
+              if (request.mode === 'navigate') return caches.match('/index.html');
+              return new Response('Offline', { status: 503 });
+            })
+          )
+      );
+      return;
+    }
+
+    // Other same-origin static assets (svg/manifest/etc): network-first with cache fallback
     event.respondWith(
-      fetch(event.request).then((response) => {
-        // Cache successful responses
-        if (response.status === 200) {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return response;
-      }).catch(() => {
-        return caches.match(event.request).then((cached) => {
-          if (cached) return cached;
-          // If offline and not cached, return index.html for navigation
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           }
-          return new Response('Offline', { status: 503 });
-        });
-      })
+          return response;
+        })
+        .catch(() =>
+          caches.match(request).then((cached) => {
+            if (cached) return cached;
+            if (request.mode === 'navigate') return caches.match('/index.html');
+            return new Response('Offline', { status: 503 });
+          })
+        )
     );
     return;
   }
 
   // External resources — network with cache fallback
   event.respondWith(
-    fetch(event.request).then((response) => {
-      if (response.status === 200) {
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
-      }
-      return response;
-    }).catch(() => {
-      return caches.match(event.request).then((cached) => {
-        return cached || new Response('Offline', { status: 503 });
-      });
-    })
+    fetch(request)
+      .then((response) => {
+        if (response && response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || new Response('Offline', { status: 503 })))
   );
+});
+
+// Message channel — lets the page tell a waiting SW to activate immediately
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // Handle notification clicks

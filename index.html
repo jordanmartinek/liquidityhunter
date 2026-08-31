@@ -18,21 +18,38 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
-      // Register service worker for offline support + PWA install
+      // Register service worker for offline support + PWA install.
+      // When a new SW is found, tell it to skip waiting and reload once it
+      // takes control, so a fresh deploy reaches the user without a manual
+      // cache clear (this fixes "old bundle keeps crashing" issues).
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
+          navigator.serviceWorker.register('/sw.js').then((reg) => {
+            // Prompt an already-waiting worker to activate
+            if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
+            reg.addEventListener('updatefound', () => {
+              const nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', () => {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  nw.postMessage('SKIP_WAITING');
+                }
+              });
+            });
+            reg.update();
+          }).catch(() => {});
+        });
+
+        // When the controlling SW changes (new version activated), reload once
+        // to pick up the fresh HTML + bundle.
+        let hasReloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (hasReloaded) return;
+          hasReloaded = true;
+          window.location.reload();
         });
       }
-      // Force update service worker on page load
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function(registrations) {
-          for (let registration of registrations) {
-            registration.update();
-          }
-        });
-      }
-      console.log('[LiquidityHunter] Build: 2026-08-18-v4');
+      console.log('[LiquidityHunter] Build: 2026-08-28-v6');
     </script>
   </body>
 </html>
