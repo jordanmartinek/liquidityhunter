@@ -8,7 +8,6 @@ import LadderTimeframeTabs from '@/components/trading/LadderTimeframeTabs';
 import DrawIndicator from '@/components/trading/DrawIndicator';
 import FibCalculator from '@/components/trading/FibCalculator';
 import SessionNotes from '@/components/trading/SessionNotes';
-import TradingPanel from '@/components/trading/TradingPanel';
 import PaperTradePanel from '@/components/trading/PaperTradePanel';
 import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
 import BiasScanner from '@/components/trading/BiasScanner';
@@ -43,7 +42,7 @@ const DEFAULT_SECTIONS = {
 
 export default function ResearchCockpit() {
   const [centerView, setCenterView] = useState('chart'); // 'chart' | 'ladder'
-  const [rightPanel, setRightPanel] = useState('analysis'); // 'analysis' | 'trading' | 'paper'
+  const [rightPanel, setRightPanel] = useState('analysis'); // 'analysis' | 'paper'
   const [ladderFullscreen, setLadderFullscreen] = useState(false); // fullscreen ladder mode
 
   // Collapsible right-rail sections — persisted so your layout sticks.
@@ -214,17 +213,6 @@ export default function ResearchCockpit() {
               🧭 Analysis
             </button>
             <button
-              onClick={() => setRightPanel('trading')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
-                rightPanel === 'trading'
-                  ? 'text-teal-400 border-teal-400 bg-teal-500/5'
-                  : 'text-slate-500 border-transparent hover:text-slate-300'
-              )}
-            >
-              ⚡ Trade
-            </button>
-            <button
               onClick={() => setRightPanel('paper')}
               className={cn(
                 'flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-semibold transition-all border-b-2',
@@ -312,8 +300,6 @@ export default function ResearchCockpit() {
                   </div>
                 </CollapsibleSection>
               </div>
-            ) : rightPanel === 'trading' ? (
-              <TradingPanel />
             ) : (
               <PaperTradePanel />
             )}
