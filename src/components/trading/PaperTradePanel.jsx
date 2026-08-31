@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useResearch } from '@/lib/researchStore';
 import { INSTRUMENTS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
@@ -61,6 +61,60 @@ export default function PaperTradePanel() {
   useEffect(() => { try { localStorage.setItem('lh_paper_maxdd', String(maxDDLimit)); } catch {} }, [maxDDLimit]);
   // Manual override to lift the lockout (resume trading) for the current day.
   const [lockoutCleared, setLockoutCleared] = useState(false);
+
+  // ── Discipline mode ─────────────────────────────────────────────────
+  // Optional friction that mirrors the old Trade mode: a rules-adherence gate,
+  // NY session time-gating, and a post-loss cooldown. OFF by default so the
+  // sim stays a free 24/7 practice tool unless you opt in. Self-contained
+  // (own lh_ storage) — no dependency on the trade-mode Entity store.
+  const [disciplineOn, setDisciplineOn] = useState(() => {
+    try { return localStorage.getItem('lh_paper_discipline') === 'on'; } catch { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('lh_paper_discipline', disciplineOn ? 'on' : 'off'); } catch {} }, [disciplineOn]);
+
+  const DEFAULT_CHECKLIST = [
+    { id: 'sweep', label: 'Liquidity sweep taken', on: false },
+    { id: 'displacement', label: 'Displacement confirmed', on: false },
+    { id: 'mss', label: 'MSS on lower timeframe', on: false },
+    { id: 'fvg', label: 'FVG / imbalance present', on: false },
+    { id: 'zone', label: 'In discount/premium zone', on: false },
+    { id: 'rr', label: 'R:R at least 1:2', on: false },
+    { id: 'killzone', label: 'In NY kill zone', on: false },
+  ];
+  const [checklist, setChecklist] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('lh_paper_checklist') || 'null');
+      if (Array.isArray(saved) && saved.length) return saved;
+    } catch {}
+    return DEFAULT_CHECKLIST;
+  });
+  useEffect(() => { try { localStorage.setItem('lh_paper_checklist', JSON.stringify(checklist)); } catch {} }, [checklist]);
+  const toggleCheck = (id) => setChecklist(prev => prev.map(c => c.id === id ? { ...c, on: !c.on } : c));
+  const resetChecklist = () => setChecklist(prev => prev.map(c => ({ ...c, on: false })));
+  const rulesPct = checklist.length ? Math.round((checklist.filter(c => c.on).length / checklist.length) * 100) : 0;
+  const RULES_THRESHOLD = 70;
+
+  // NY session window: unlocks 30 min before 09:30 ET open, locks at 16:00 ET.
+  // Uses the browser's America/New_York wall clock.
+  const nyHour = () => {
+    try {
+      const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+      const h = parseInt(p.find(x => x.type === 'hour')?.value || '0', 10);
+      const m = parseInt(p.find(x => x.type === 'minute')?.value || '0', 10);
+      return h + m / 60;
+    } catch { return 12; }
+  };
+  const [nowTick, setNowTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => setNowTick(n => n + 1), 30000); return () => clearInterval(t); }, []);
+  const inTradingWindow = (() => { const h = nyHour(); return h >= 9.0 && h < 16.0; })(); // 30m pre-open → close
+
+  // Post-loss cooldown (5 min after a loss). Persisted timestamp.
+  const [cooldownUntil, setCooldownUntil] = useState(() => {
+    try { const n = parseFloat(localStorage.getItem('lh_paper_cooldown')); return n > 0 ? n : 0; } catch { return 0; }
+  });
+  useEffect(() => { try { localStorage.setItem('lh_paper_cooldown', String(cooldownUntil)); } catch {} }, [cooldownUntil]);
+  const inCooldown = cooldownUntil > Date.now();
+  const cooldownLeft = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
 
   // Prop-firm rule presets — one click sets balance + daily loss + max DD.
   const PROP_PRESETS = [
@@ -398,8 +452,17 @@ export default function PaperTradePanel() {
   const lockoutReason = hitMaxDD ? 'maxdd' : 'daily';
 
   // Submit paper trade
+  // Discipline gates that block a new trade (only when discipline mode is on).
+  const disciplineBlock = disciplineOn && (
+    !inTradingWindow ? 'Outside NY session window'
+    : inCooldown ? `Post-loss cooldown (${cooldownLeft}s)`
+    : rulesPct < RULES_THRESHOLD ? `Rules ${rulesPct}% — need ≥${RULES_THRESHOLD}%`
+    : null
+  );
+
   const handleSubmit = () => {
     if (lockedOut) return; // daily loss limit hit — no new trades
+    if (disciplineBlock) return; // discipline gate not satisfied
     // Entry defaults to the current (market) price if left blank.
     const entry = parseFloat(form.entry) || lastPrice || 0;
     const stop = parseFloat(form.stop) || 0;
@@ -440,6 +503,7 @@ export default function PaperTradePanel() {
     };
 
     setTrades(prev => [trade, ...prev]);
+    if (disciplineOn) resetChecklist(); // re-check rules for each new trade
     setForm({ direction: 'long', entry: '', stop: '', target: '', target2: '', target3: '', levelType: '', grade: '', setupNotes: '' });
     setShowForm(false);
   };
@@ -448,6 +512,18 @@ export default function PaperTradePanel() {
   const resolveTrade = (id, result) => {
     setTrades(prev => prev.map(t => t.id === id ? { ...t, result, resolved: new Date().toISOString() } : t));
   };
+
+  // Post-loss cooldown: when the count of losing trades rises (auto or manual)
+  // and discipline mode is on, start a 5-minute cooldown that blocks entries.
+  const lossCountRef = useRef(null);
+  useEffect(() => {
+    const losses = trades.filter(t => t.result === 'stop_hit' || t.result === 'vwap_break').length;
+    if (lossCountRef.current === null) { lossCountRef.current = losses; return; }
+    if (losses > lossCountRef.current && disciplineOn) {
+      setCooldownUntil(Date.now() + 5 * 60 * 1000);
+    }
+    lossCountRef.current = losses;
+  }, [trades, disciplineOn]);
 
   // Scale out a fraction of an open trade at the current price. Records the
   // partial and, if fully scaled, resolves the trade as a (blended) target hit.
@@ -539,6 +615,12 @@ export default function PaperTradePanel() {
           <button onClick={() => setShowStats(!showStats)} className={cn('text-[9px] px-1.5 py-0.5 rounded border transition-colors',
             showStats ? 'text-teal-400 bg-teal-500/10 border-teal-500/30' : 'text-zinc-500 border-zinc-700 hover:text-zinc-300')}>
             Stats
+          </button>
+          <button onClick={() => setDisciplineOn(v => !v)} aria-pressed={disciplineOn}
+            title={disciplineOn ? 'Discipline mode ON — rules gate, NY window & post-loss cooldown enforced' : 'Discipline mode OFF — free 24/7 practice'}
+            className={cn('text-[9px] px-1.5 py-0.5 rounded border transition-colors',
+              disciplineOn ? 'text-amber-300 bg-amber-500/10 border-amber-500/40' : 'text-zinc-500 border-zinc-700 hover:text-zinc-300')}>
+            🎯 Discipline
           </button>
           {trades.length > 0 && <button onClick={exportCSV} title="Export session to CSV" className="text-[9px] text-zinc-500 hover:text-teal-400 px-1">⬇ CSV</button>}
           {trades.length > 0 && <button onClick={clearAll} className="text-[9px] text-zinc-600 hover:text-red-400 px-1">Clear</button>}
@@ -850,6 +932,26 @@ export default function PaperTradePanel() {
               <option value="Other">Other</option>
             </select>
 
+            {/* Discipline: rules checklist gate */}
+            {disciplineOn && (
+              <div className="p-2 rounded border border-amber-500/20 bg-amber-500/5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] uppercase tracking-wider text-amber-400">Entry rules</span>
+                  <span className={cn('text-[9px] font-bold tabular-nums', rulesPct >= RULES_THRESHOLD ? 'text-emerald-400' : 'text-red-400')}>
+                    {rulesPct}% {rulesPct >= RULES_THRESHOLD ? '✓' : `(need ${RULES_THRESHOLD}%)`}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-0.5">
+                  {checklist.map(c => (
+                    <label key={c.id} className="flex items-center gap-1.5 text-[9px] text-zinc-300 cursor-pointer hover:text-white">
+                      <input type="checkbox" checked={c.on} onChange={() => toggleCheck(c.id)} className="accent-amber-400 w-3 h-3" />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Setup grade A/B/C */}
             <div className="flex items-center gap-1.5 px-1">
               <span className="text-[8px] text-zinc-500 uppercase">Grade</span>
@@ -871,9 +973,15 @@ export default function PaperTradePanel() {
               placeholder="Quick note: what did you see?"
               className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 focus:outline-none focus:border-purple-400/50" />
 
+            {/* Discipline gate reason (blocks execute) */}
+            {disciplineBlock && (
+              <div className="text-[9px] text-red-300 bg-red-500/10 border border-red-500/30 rounded px-2 py-1 text-center">
+                🔒 {disciplineBlock}
+              </div>
+            )}
             {/* Actions */}
             <div className="flex gap-1">
-              <button onClick={handleSubmit} disabled={!form.entry || !form.stop || !form.target}
+              <button onClick={handleSubmit} disabled={!form.stop || !form.target || !!disciplineBlock}
                 className="flex-1 py-1.5 rounded text-[10px] font-semibold bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
                 📝 Paper Execute
               </button>
