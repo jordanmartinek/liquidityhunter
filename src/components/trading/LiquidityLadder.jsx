@@ -1258,6 +1258,81 @@ export default function LiquidityLadder() {
     setPanOffset(rawPct - 50);
   }, [lastPrice]);
 
+  // ── Keyboard shortcuts ───────────────────────────────────────────────
+  // The ladder previously had no hotkeys. Bind a small, discoverable set.
+  // Everything is skipped while the user is typing in an input/textarea/select
+  // or an editable field, and while any modifier (Ctrl/Cmd/Alt) is held so we
+  // never clobber browser/OS shortcuts.
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // Default alert-zone band width (± points) for the "Add Alert Zone" action.
+  // Persisted so your preferred width sticks; editable per-add via the prompt.
+  const [alertBandWidth, setAlertBandWidth] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem('lh_ladder_alert_band'));
+      return Number.isFinite(v) && v > 0 ? v : 5;
+    } catch { return 5; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_alert_band', String(alertBandWidth)); } catch {}
+  }, [alertBandWidth]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const t = e.target;
+      const tag = t?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable;
+      if (typing) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      switch (e.key) {
+        case '+':
+        case '=':
+          setZoom((z) => Math.min(15, z + 0.3)); break;
+        case '-':
+        case '_':
+          setZoom((z) => Math.max(0.3, z - 0.3)); break;
+        case 'c':
+        case 'C':
+          if (lastPrice > 0) recenterOnPrice(); break;
+        case 'r':
+        case 'R':
+          resetView(); break;
+        case 'f':
+        case 'F':
+          setFocusMode((f) => !f); break;
+        case 'm':
+        case 'M':
+          toggleMeasure(); break;
+        case 'w':
+        case 'W':
+          toggleWhatIf(); break;
+        case 'b':
+        case 'B':
+          setBlurEnabled((v) => !v); break;
+        case 's':
+        case 'S':
+          setSnapEnabled((v) => !v); break;
+        case 'l':
+        case 'L':
+          setLayersOpen((o) => !o); break;
+        case 'k':
+        case 'K':
+          cycleCandleMode(); break;
+        case '?':
+          setShowShortcuts((s) => !s); break;
+        case 'Escape':
+          setShowShortcuts(false); break;
+        default:
+          return;
+      }
+      // Only reach here if a shortcut matched.
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lastPrice, recenterOnPrice, resetView, toggleMeasure, toggleWhatIf, cycleCandleMode]);
+
   // Detect confluence (levels within 15 pts of each other)
   const confluenceLevels = useMemo(() => {
     const active = filteredLevels.filter(l => l.sweep_status !== 'Swept');
@@ -1751,7 +1826,61 @@ export default function LiquidityLadder() {
         >
           🔔 Alerts
         </button>
+        <button
+          onClick={() => setShowShortcuts(s => !s)}
+          aria-label="Keyboard shortcuts" aria-pressed={showShortcuts}
+          title="Keyboard shortcuts (press ? anytime)"
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            showShortcuts
+              ? 'bg-slate-500/25 border-slate-400/60 text-slate-200'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          ⌨ ?
+        </button>
       </div>
+
+      {/* Keyboard shortcuts cheatsheet */}
+      {showShortcuts && (
+        <div className="absolute inset-0 z-[400] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onMouseDown={(e) => { e.stopPropagation(); setShowShortcuts(false); }}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="bg-terminal-bg border border-terminal-border rounded-lg shadow-2xl p-4 max-w-[280px] w-[90%]"
+            onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-bold text-slate-200">⌨ Keyboard Shortcuts</span>
+              <button onClick={() => setShowShortcuts(false)}
+                aria-label="Close shortcuts"
+                className="text-slate-500 hover:text-white text-[12px] leading-none">✕</button>
+            </div>
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[10px]">
+              {[
+                ['+ / −', 'Zoom in / out'],
+                ['C', 'Center on current price'],
+                ['R', 'Reset view'],
+                ['F', 'Focus mode (hide overlays)'],
+                ['M', 'Measure tool'],
+                ['W', 'What-If preview'],
+                ['B', 'Depth-of-field blur'],
+                ['S', 'Snap-to-price'],
+                ['L', 'Layers panel'],
+                ['K', 'Cycle candle mode'],
+                ['?', 'Toggle this help'],
+                ['Esc', 'Close help'],
+              ].map(([key, desc]) => (
+                <React.Fragment key={key}>
+                  <kbd className="justify-self-start px-1.5 py-0.5 rounded bg-slate-800 border border-terminal-border text-slate-300 font-mono text-[9px] whitespace-nowrap">{key}</kbd>
+                  <span className="text-slate-400 self-center">{desc}</span>
+                </React.Fragment>
+              ))}
+            </div>
+            <div className="text-[8px] text-slate-600 mt-2 pt-2 border-t border-terminal-border">
+              Shortcuts are ignored while typing in a field.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Alerts panel */}
       {alertsOpen && (
@@ -2453,17 +2582,46 @@ export default function LiquidityLadder() {
             className="w-full px-3 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800 flex items-center gap-2">
             <span>✨</span> Reset to Untouched
           </button>
+          <button onClick={() => {
+            const lvl = contextMenu.level;
+            const current = lvl.name || lvl.pool_type || '';
+            const next = window.prompt('Rename level:', current);
+            if (next !== null && next.trim() && next.trim() !== current) {
+              updateLevel(lvl.id, { name: next.trim() });
+            }
+            closeContextMenu();
+          }}
+            className="w-full px-3 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+            <span>✏️</span> Rename
+          </button>
+          <button onClick={() => {
+            const lvl = contextMenu.level;
+            const next = window.prompt('Note for this level:', lvl.notes || '');
+            if (next !== null) {
+              updateLevel(lvl.id, { notes: next.trim() });
+            }
+            closeContextMenu();
+          }}
+            className="w-full px-3 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+            <span>🗒️</span> {contextMenu.level.notes ? 'Edit note' : 'Add note'}
+          </button>
           <button onClick={() => { removeLevel(contextMenu.level.id); closeContextMenu(); }}
             className="w-full px-3 py-1.5 text-left text-[10px] text-red-400 hover:bg-red-500/10 flex items-center gap-2">
             <span>🗑️</span> Delete Level
           </button>
           <div className="border-t border-terminal-border mt-0.5 pt-0.5">
             <button onClick={() => {
-              alertZoneManager.addZone(contextMenu.level.price + 5, contextMenu.level.price - 5, `Zone: ${contextMenu.level.name || contextMenu.level.pool_type}`);
+              const lvl = contextMenu.level;
+              const raw = window.prompt('Alert band width (± points around the level):', String(alertBandWidth));
+              if (raw === null) { closeContextMenu(); return; }
+              const w = parseFloat(raw);
+              const width = Number.isFinite(w) && w > 0 ? w : alertBandWidth;
+              setAlertBandWidth(width); // remember the last choice as the new default
+              alertZoneManager.addZone(lvl.price + width, lvl.price - width, `Zone: ${lvl.name || lvl.pool_type}`);
               closeContextMenu();
             }}
               className="w-full px-3 py-1.5 text-left text-[10px] text-amber-400 hover:bg-amber-500/10 flex items-center gap-2">
-              <span>🔔</span> Add Alert Zone (±5pts)
+              <span>🔔</span> Add Alert Zone (±{alertBandWidth}pts)
             </button>
             <button onClick={() => {
               const lvl = contextMenu.level;
