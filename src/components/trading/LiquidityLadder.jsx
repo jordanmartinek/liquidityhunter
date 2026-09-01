@@ -426,6 +426,10 @@ export default function LiquidityLadder() {
 
   // #9: Velocity
   const [velocity, setVelocity] = useState({ speed: 0, direction: 0, chevrons: 0 });
+  // Smoothed speed (pts/sec) for time-to-level projection — an EMA of the raw
+  // speed so the ETAs stay steady instead of jumping on every tick.
+  const smoothedSpeedRef = useRef(0);
+  const [smoothedSpeed, setSmoothedSpeed] = useState(0);
 
   // #12: Drag-to-edit state
   const [dragEditLevel, setDragEditLevel] = useState(null);
@@ -851,7 +855,19 @@ export default function LiquidityLadder() {
     }
 
     // #9: Velocity calculation
-    setVelocity(calculateVelocity(priceLineRef.current));
+    const vel = calculateVelocity(priceLineRef.current);
+    setVelocity(vel);
+
+    // Smoothed speed via EMA (alpha ~0.12 ≈ 30–45s effective window at ~1Hz).
+    // Steady magnitude for projection ETAs; raw velocity still drives chevrons.
+    const alpha = 0.12;
+    smoothedSpeedRef.current = smoothedSpeedRef.current === 0
+      ? vel.speed
+      : smoothedSpeedRef.current + alpha * (vel.speed - smoothedSpeedRef.current);
+    // Publish every few ticks to avoid excess re-renders.
+    if (priceLineRef.current.length % 3 === 0) {
+      setSmoothedSpeed(smoothedSpeedRef.current);
+    }
 
     // #10: Stall detection
     const detectedStalls = detectStalls(priceLineRef.current, curLevels, lastPrice);
@@ -1449,17 +1465,17 @@ export default function LiquidityLadder() {
     if (!candidates.length) return null;
     const target = candidates[0];
     const points = Math.abs(target.price - lastPrice);
-    // ETA only when price is moving toward the target.
+    // ETA only when price is moving toward the target (uses smoothed speed).
     let eta = null;
-    if (velocity && velocity.speed >= 0.1 &&
+    if (velocity && smoothedSpeed >= 0.05 &&
         ((up && velocity.direction > 0) || (down && velocity.direction < 0))) {
-      const secs = points / velocity.speed;
+      const secs = points / smoothedSpeed;
       if (secs > 0 && secs < 3600) {
         eta = secs < 60 ? `${Math.round(secs)}s` : `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
       }
     }
     return { up, target, points, eta };
-  }, [lastPrice, drawDirection, filteredLevels, velocity]);
+  }, [lastPrice, drawDirection, filteredLevels, velocity, smoothedSpeed]);
 
   // ── Per-level time projection ───────────────────────────────────────
   // Map of levelId → human ETA, for levels in the current direction of travel,
@@ -1468,7 +1484,8 @@ export default function LiquidityLadder() {
   // produce absurd numbers.
   const etaByLevel = useMemo(() => {
     const map = {};
-    if (!projectionOn || lastPrice <= 0 || !velocity || velocity.speed < 0.05 || velocity.direction === 0) return map;
+    // Use the smoothed (EMA) speed so ETAs are steady; direction stays live.
+    if (!projectionOn || lastPrice <= 0 || !velocity || smoothedSpeed < 0.05 || velocity.direction === 0) return map;
     const movingUp = velocity.direction > 0;
     for (const l of filteredLevels) {
       if (l.sweep_status === 'Swept') continue;
@@ -1476,14 +1493,14 @@ export default function LiquidityLadder() {
       if ((above && !movingUp) || (!above && movingUp)) continue; // wrong direction
       const distance = Math.abs(l.price - lastPrice);
       if (distance < 0.5) continue;
-      const secs = distance / velocity.speed;
+      const secs = distance / smoothedSpeed;
       if (secs <= 0 || secs > 1800) continue; // > 30 min = not meaningful
       map[l.id] = secs < 60
         ? `${Math.round(secs)}s`
         : `${Math.floor(secs / 60)}m${Math.round(secs % 60).toString().padStart(2, '0')}s`;
     }
     return map;
-  }, [projectionOn, lastPrice, velocity, filteredLevels]);
+  }, [projectionOn, lastPrice, velocity, smoothedSpeed, filteredLevels]);
 
   const allLevels = filteredLevels;
 
@@ -1691,7 +1708,7 @@ export default function LiquidityLadder() {
         {/* Next-level projection (nearest ETA in the direction of travel) */}
         {projectionOn && nextProjection && (
           <span className="text-[8px] px-1.5 py-0.5 rounded border bg-teal-500/15 border-teal-500/40 text-teal-300 whitespace-nowrap"
-            title={`At the current speed (${velocity.speed.toFixed(2)} pts/s), price reaches ${nextProjection.name} @ ${nextProjection.price.toFixed(2)} in about ${nextProjection.eta}`}>
+            title={`At the recent average speed (${smoothedSpeed.toFixed(2)} pts/s), price reaches ${nextProjection.name} @ ${nextProjection.price.toFixed(2)} in about ${nextProjection.eta}`}>
             ⏱ {nextProjection.name} in ~{nextProjection.eta}
           </span>
         )}
