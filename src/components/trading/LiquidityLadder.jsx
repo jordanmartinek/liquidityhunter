@@ -90,7 +90,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf, comfortable, sweepReaction, confluence,
+  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -163,6 +163,12 @@ function Rung({
             'text-slate-600'
           )}>
             {sweepProb}%
+          </span>
+        )}
+        {/* Time projection: ETA to reach this level at the current speed */}
+        {eta && !isSwept && (
+          <span className="text-[7px] tabular-nums font-mono text-teal-400 block" title={`At the current speed & direction, price reaches this level in about ${eta}`}>
+            ⏱{eta}
           </span>
         )}
       </div>
@@ -1293,6 +1299,15 @@ export default function LiquidityLadder() {
   // shortcuts) behind a single ⚙ button.
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Time projection — show an ETA badge on each level in the direction of
+  // travel, estimated from current price speed. Off by default; persisted.
+  const [projectionOn, setProjectionOn] = useState(() => {
+    try { return localStorage.getItem('lh_ladder_projection') === 'on'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_projection', projectionOn ? 'on' : 'off'); } catch {}
+  }, [projectionOn]);
+
   useEffect(() => {
     const onKey = (e) => {
       const t = e.target;
@@ -1446,6 +1461,30 @@ export default function LiquidityLadder() {
     return { up, target, points, eta };
   }, [lastPrice, drawDirection, filteredLevels, velocity]);
 
+  // ── Per-level time projection ───────────────────────────────────────
+  // Map of levelId → human ETA, for levels in the current direction of travel,
+  // estimated from the price speed. Only computed while the toggle is on and
+  // price is actually moving. Capped at 30 min so stale/slow drift doesn't
+  // produce absurd numbers.
+  const etaByLevel = useMemo(() => {
+    const map = {};
+    if (!projectionOn || lastPrice <= 0 || !velocity || velocity.speed < 0.05 || velocity.direction === 0) return map;
+    const movingUp = velocity.direction > 0;
+    for (const l of filteredLevels) {
+      if (l.sweep_status === 'Swept') continue;
+      const above = l.price > lastPrice;
+      if ((above && !movingUp) || (!above && movingUp)) continue; // wrong direction
+      const distance = Math.abs(l.price - lastPrice);
+      if (distance < 0.5) continue;
+      const secs = distance / velocity.speed;
+      if (secs <= 0 || secs > 1800) continue; // > 30 min = not meaningful
+      map[l.id] = secs < 60
+        ? `${Math.round(secs)}s`
+        : `${Math.floor(secs / 60)}m${Math.round(secs % 60).toString().padStart(2, '0')}s`;
+    }
+    return map;
+  }, [projectionOn, lastPrice, velocity, filteredLevels]);
+
   const allLevels = filteredLevels;
 
   // Smart level suggestions (only when toggled on). Recomputed as the tick
@@ -1569,6 +1608,21 @@ export default function LiquidityLadder() {
   const flowLean = orderFlow.buyPressure >= 60 ? 'buy'
     : orderFlow.sellPressure >= 60 ? 'sell' : 'balanced';
 
+  // Nearest projected level (soonest ETA) for the glanceable bias-strip chip.
+  const nextProjection = (() => {
+    if (!projectionOn || velocity.direction === 0) return null;
+    const movingUp = velocity.direction > 0;
+    let best = null;
+    for (const l of filteredLevels) {
+      if (l.sweep_status === 'Swept' || !etaByLevel[l.id]) continue;
+      const dist = Math.abs(l.price - lastPrice);
+      if (best === null || dist < best.dist) {
+        best = { dist, name: l.name || l.pool_type || 'level', price: l.price, eta: etaByLevel[l.id] };
+      }
+    }
+    return best;
+  })();
+
   return (
     <div
       ref={containerRef}
@@ -1632,6 +1686,13 @@ export default function LiquidityLadder() {
           )}
           title={`Nearest unswept ${drawProjection.up ? 'buy-side' : 'sell-side'} pool in the draw direction: ${drawProjection.target.name || drawProjection.target.pool_type} @ ${drawProjection.target.price.toFixed(2)}`}>
             🎯 {drawProjection.points.toFixed(1)}pts to draw{drawProjection.eta ? ` · ~${drawProjection.eta}` : ''}
+          </span>
+        )}
+        {/* Next-level projection (nearest ETA in the direction of travel) */}
+        {projectionOn && nextProjection && (
+          <span className="text-[8px] px-1.5 py-0.5 rounded border bg-teal-500/15 border-teal-500/40 text-teal-300 whitespace-nowrap"
+            title={`At the current speed (${velocity.speed.toFixed(2)} pts/s), price reaches ${nextProjection.name} @ ${nextProjection.price.toFixed(2)} in about ${nextProjection.eta}`}>
+            ⏱ {nextProjection.name} in ~{nextProjection.eta}
           </span>
         )}
       </div>
@@ -1932,6 +1993,7 @@ export default function LiquidityLadder() {
               { on: comfortable, label: '🔎 Large text', off: '🔎 Compact', onClick: () => setDensity(p => p === 'comfortable' ? 'compact' : 'comfortable'), active: 'bg-sky-500/20 border-sky-500/50 text-sky-300' },
               { on: layersOpen, label: '▤ Layers', off: '▤ Layers', onClick: () => setLayersOpen(o => !o), active: 'bg-slate-500/25 border-slate-400/60 text-slate-200' },
               { on: suggestionsOn, label: '💡 Ideas', off: '💡 Ideas', onClick: () => setSuggestionsOn(v => !v), active: 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300' },
+              { on: projectionOn, label: '⏱ Projection', off: '⏱ Projection', onClick: () => setProjectionOn(v => !v), active: 'bg-teal-500/20 border-teal-500/50 text-teal-300' },
               { on: (soundOn || notifyOn), label: '🔔 Alerts', off: '🔔 Alerts', onClick: () => setAlertsOpen(o => !o), active: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' },
               { on: showShortcuts, label: '⌨ Shortcuts', off: '⌨ Shortcuts', onClick: () => setShowShortcuts(s => !s), active: 'bg-slate-500/25 border-slate-400/60 text-slate-200' },
             ].map((b, i) => (
@@ -2392,6 +2454,7 @@ export default function LiquidityLadder() {
               comfortable={comfortable}
               sweepReaction={sweepReaction}
               confluence={confluence}
+              eta={etaByLevel[level.id] || null}
             />
           );
         })}

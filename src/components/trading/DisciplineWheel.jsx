@@ -83,6 +83,32 @@ export default function DisciplineWheel() {
     commit(checklist.map(c => ({ ...c, on: false })));
   }, [checklist, commit]);
 
+  // ── Editing your rules ──────────────────────────────────────────────
+  const [editMode, setEditMode] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+
+  const renameRule = useCallback((id, label) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    commit(checklist.map(c => c.id === id ? { ...c, label: trimmed } : c));
+  }, [checklist, commit]);
+
+  const deleteRule = useCallback((id) => {
+    commit(checklist.filter(c => c.id !== id));
+  }, [checklist, commit]);
+
+  const addRule = useCallback(() => {
+    const label = newLabel.trim();
+    if (!label) return;
+    const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    commit([...checklist, { id, label, on: false }]);
+    setNewLabel('');
+  }, [newLabel, checklist, commit]);
+
+  const restoreDefaults = useCallback(() => {
+    commit(DEFAULT_CHECKLIST.map(c => ({ ...c })));
+  }, [commit]);
+
   const total = checklist.length;
   const checked = checklist.filter(c => c.on).length;
   const pct = total ? Math.round((checked / total) * 100) : 0;
@@ -129,7 +155,12 @@ export default function DisciplineWheel() {
         <span>🎯</span>
         <span>Discipline</span>
         <span className="text-[9px] text-slate-600 ml-auto">{checked}/{total} rules</span>
-        {checked > 0 && (
+        <button onClick={() => setEditMode(e => !e)}
+          className={`text-[8px] ml-1 ${editMode ? 'text-teal-400' : 'text-slate-600 hover:text-slate-300'}`}
+          title="Edit your rules">
+          {editMode ? 'done' : '✎ edit'}
+        </button>
+        {!editMode && checked > 0 && (
           <button onClick={reset} className="text-[8px] text-slate-600 hover:text-red-400 ml-1">reset</button>
         )}
       </div>
@@ -181,17 +212,58 @@ export default function DisciplineWheel() {
         </div>
 
         {/* Compact checklist — tap a segment above OR a row here */}
-        <div className="w-full mt-2 space-y-0.5">
-          {checklist.map(c => (
-            <button key={c.id} onClick={() => toggle(c.id)}
-              className="w-full flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-terminal-panel text-left">
-              <span className={`w-3 h-3 rounded-sm border flex items-center justify-center text-[8px] shrink-0 ${
-                c.on ? 'bg-teal-500/30 border-teal-500/60 text-teal-300' : 'border-terminal-border text-transparent'
-              }`}>✓</span>
-              <span className={`text-[10px] ${c.on ? 'text-slate-300' : 'text-slate-500'}`}>{c.label}</span>
-            </button>
-          ))}
-        </div>
+        {!editMode ? (
+          <div className="w-full mt-2 space-y-0.5">
+            {checklist.map(c => (
+              <button key={c.id} onClick={() => toggle(c.id)}
+                className="w-full flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-terminal-panel text-left">
+                <span className={`w-3 h-3 rounded-sm border flex items-center justify-center text-[8px] shrink-0 ${
+                  c.on ? 'bg-teal-500/30 border-teal-500/60 text-teal-300' : 'border-terminal-border text-transparent'
+                }`}>✓</span>
+                <span className={`text-[10px] ${c.on ? 'text-slate-300' : 'text-slate-500'}`}>{c.label}</span>
+              </button>
+            ))}
+            {total === 0 && (
+              <div className="text-center text-[9px] text-slate-600 py-2">No rules yet — tap ✎ edit to add some.</div>
+            )}
+          </div>
+        ) : (
+          /* Edit mode — rename, delete, add rules */
+          <div className="w-full mt-2 space-y-1">
+            {checklist.map(c => (
+              <div key={c.id} className="flex items-center gap-1">
+                <input
+                  defaultValue={c.label}
+                  onBlur={(e) => { if (e.target.value.trim() !== c.label) renameRule(c.id, e.target.value); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  className="flex-1 text-[10px] px-1 py-0.5 rounded bg-terminal-bg border border-terminal-border text-slate-300 focus:outline-none focus:border-teal-500/50 min-w-0"
+                  aria-label={`Rename rule ${c.label}`}
+                />
+                <button onClick={() => deleteRule(c.id)}
+                  aria-label={`Delete rule ${c.label}`}
+                  className="text-[10px] text-slate-600 hover:text-red-400 shrink-0 px-0.5">🗑</button>
+              </div>
+            ))}
+            <div className="flex items-center gap-1 pt-1">
+              <input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addRule(); }}
+                placeholder="Add a rule…"
+                className="flex-1 text-[10px] px-1 py-0.5 rounded bg-terminal-bg border border-terminal-border text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-teal-500/50 min-w-0"
+                aria-label="New rule label"
+              />
+              <button onClick={addRule} disabled={!newLabel.trim()}
+                className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${
+                  newLabel.trim()
+                    ? 'border-teal-500/40 bg-teal-500/15 text-teal-300 hover:bg-teal-500/25'
+                    : 'border-terminal-border text-slate-600 cursor-not-allowed'
+                }`}>+ add</button>
+            </div>
+            <button onClick={restoreDefaults}
+              className="text-[8px] text-slate-600 hover:text-slate-300 mt-1">↺ restore default rules</button>
+          </div>
+        )}
       </div>
     </div>
   );
