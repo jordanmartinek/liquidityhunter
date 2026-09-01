@@ -96,6 +96,25 @@ export default function PaperTradePanel() {
       window.dispatchEvent(new CustomEvent('lh:checklist', { detail: checklist }));
     } catch {}
   }, [checklist]);
+  // Listen for edits/toggles coming from the Discipline Wheel so both stay in
+  // sync live. Guard against the echo of our own broadcast to avoid a loop.
+  useEffect(() => {
+    const apply = (incoming) => {
+      if (!Array.isArray(incoming)) return;
+      setChecklist(prev => JSON.stringify(prev) === JSON.stringify(incoming) ? prev : incoming);
+    };
+    const onCustom = (e) => apply(e.detail);
+    const onStorage = (e) => {
+      if (e.key !== 'lh_paper_checklist') return;
+      try { apply(JSON.parse(e.newValue || 'null')); } catch {}
+    };
+    window.addEventListener('lh:checklist', onCustom);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('lh:checklist', onCustom);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
   const toggleCheck = (id) => setChecklist(prev => prev.map(c => c.id === id ? { ...c, on: !c.on } : c));
   const resetChecklist = () => setChecklist(prev => prev.map(c => ({ ...c, on: false })));
   const rulesPct = checklist.length ? Math.round((checklist.filter(c => c.on).length / checklist.length) * 100) : 0;
