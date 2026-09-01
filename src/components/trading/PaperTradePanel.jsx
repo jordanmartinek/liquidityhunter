@@ -88,7 +88,14 @@ export default function PaperTradePanel() {
     } catch {}
     return DEFAULT_CHECKLIST;
   });
-  useEffect(() => { try { localStorage.setItem('lh_paper_checklist', JSON.stringify(checklist)); } catch {} }, [checklist]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('lh_paper_checklist', JSON.stringify(checklist));
+      // Broadcast so the Discipline Wheel (and any other listener) updates live
+      // in the same tab — the native 'storage' event only fires across tabs.
+      window.dispatchEvent(new CustomEvent('lh:checklist', { detail: checklist }));
+    } catch {}
+  }, [checklist]);
   const toggleCheck = (id) => setChecklist(prev => prev.map(c => c.id === id ? { ...c, on: !c.on } : c));
   const resetChecklist = () => setChecklist(prev => prev.map(c => ({ ...c, on: false })));
   const rulesPct = checklist.length ? Math.round((checklist.filter(c => c.on).length / checklist.length) * 100) : 0;

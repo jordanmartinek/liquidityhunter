@@ -6,7 +6,7 @@ import LiquidityLevelList from '@/components/trading/LiquidityLevelList';
 import LiquidityLadder from '@/components/trading/LiquidityLadder';
 import LadderTimeframeTabs from '@/components/trading/LadderTimeframeTabs';
 import DrawIndicator from '@/components/trading/DrawIndicator';
-import FibCalculator from '@/components/trading/FibCalculator';
+import DisciplineWheel from '@/components/trading/DisciplineWheel';
 import SessionNotes from '@/components/trading/SessionNotes';
 import PaperTradePanel from '@/components/trading/PaperTradePanel';
 import AVWAPPlanner from '@/components/trading/AVWAPPlanner';
@@ -134,14 +134,14 @@ export default function ResearchCockpit() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row md:min-h-0 overflow-y-auto md:overflow-hidden">
-        {/* LEFT RAIL — Level List, Fib Calculator */}
+        {/* LEFT RAIL — Level List, Discipline Wheel */}
         <div className="w-full md:w-72 shrink-0 border-b md:border-b-0 md:border-r border-terminal-border flex flex-col md:min-h-0 md:overflow-y-auto"
           style={{ zoom: railZoom }}>
           <div className="flex-1 md:min-h-0">
             <LiquidityLevelList />
           </div>
           <div className="shrink-0 border-t border-terminal-border">
-            <FibCalculator />
+            <DisciplineWheel />
           </div>
         </div>
 
