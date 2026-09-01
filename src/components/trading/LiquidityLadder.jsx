@@ -21,6 +21,7 @@ import {
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity, calculateETAs } from '@/lib/ladderExtras';
+import { calculateOrderFlow, getSessionProgress, getPhaseLabel } from '@/lib/priceNarrative';
 import { ladderAudio } from '@/lib/ladderAudio';
 import { requestPermission as requestNotifyPermission, sendNotification } from '@/lib/notifications';
 import { alertZoneManager } from '@/lib/bangerFeatures';
@@ -1277,6 +1278,16 @@ export default function LiquidityLadder() {
     try { localStorage.setItem('lh_ladder_alert_band', String(alertBandWidth)); } catch {}
   }, [alertBandWidth]);
 
+  // Smart level suggestions — ghost rungs at price areas visited repeatedly or
+  // at session extremes not yet marked. Off by default; persisted.
+  const [suggestionsOn, setSuggestionsOn] = useState(() => {
+    try { return localStorage.getItem('lh_ladder_suggestions') === 'on'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_suggestions', suggestionsOn ? 'on' : 'off'); } catch {}
+  }, [suggestionsOn]);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState({}); // rounded price -> true
+
   useEffect(() => {
     const onKey = (e) => {
       const t = e.target;
@@ -1401,7 +1412,62 @@ export default function LiquidityLadder() {
     };
   }, [lastPrice, velocity, filteredLevels, displacements]);
 
+  // ── Distance-to-draw projection ─────────────────────────────────────
+  // When a draw direction (bias) is set, find the nearest UNSWEPT pool in
+  // that direction and show live points-away + an ETA from current velocity.
+  // Up draw → target buy-side liquidity above; Down draw → sell-side below.
+  const drawProjection = useMemo(() => {
+    if (lastPrice <= 0 || !drawDirection) return null;
+    const up = drawDirection.includes('Up');
+    const down = drawDirection.includes('Down');
+    if (!up && !down) return null;
+    const wantSide = up ? 'Buy-Side' : 'Sell-Side';
+    const candidates = filteredLevels
+      .filter(l => l.sweep_status !== 'Swept' && l.side === wantSide)
+      .filter(l => up ? l.price > lastPrice : l.price < lastPrice)
+      .sort((a, b) => up ? a.price - b.price : b.price - a.price);
+    if (!candidates.length) return null;
+    const target = candidates[0];
+    const points = Math.abs(target.price - lastPrice);
+    // ETA only when price is moving toward the target.
+    let eta = null;
+    if (velocity && velocity.speed >= 0.1 &&
+        ((up && velocity.direction > 0) || (down && velocity.direction < 0))) {
+      const secs = points / velocity.speed;
+      if (secs > 0 && secs < 3600) {
+        eta = secs < 60 ? `${Math.round(secs)}s` : `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
+      }
+    }
+    return { up, target, points, eta };
+  }, [lastPrice, drawDirection, filteredLevels, velocity]);
+
   const allLevels = filteredLevels;
+
+  // Smart level suggestions (only when toggled on). Recomputed as the tick
+  // history grows; dismissed suggestions are filtered out until reload.
+  const smartSuggestions = useMemo(() => {
+    if (!suggestionsOn) return [];
+    const raw = generateSmartSuggestions(priceLine, filteredLevels, 3);
+    return raw.filter(s => !dismissedSuggestions[Math.round(s.price * 2) / 2]);
+  }, [suggestionsOn, priceLine, filteredLevels, dismissedSuggestions]);
+
+  // Turn a suggestion into a real level, then dismiss it from the list.
+  const acceptSuggestion = useCallback((s) => {
+    addLevel({
+      name: s.type,
+      pool_type: s.type,
+      side: s.side,
+      price: parseFloat(s.price.toFixed(2)),
+      timeframe: activeTimeframe && activeTimeframe !== 'all' ? activeTimeframe : '5m',
+      strength: 'Medium',
+      sweep_status: 'Untouched',
+      notes: s.reason,
+    });
+    setDismissedSuggestions(prev => ({ ...prev, [Math.round(s.price * 2) / 2]: true }));
+  }, [addLevel, activeTimeframe]);
+  const dismissSuggestion = useCallback((s) => {
+    setDismissedSuggestions(prev => ({ ...prev, [Math.round(s.price * 2) / 2]: true }));
+  }, []);
 
   // Compute positions — PURE proportional
   const { positions, priceMarkerPercent, topPrice, bottomPrice, trailPositions, paddedMax, paddedMin, totalRange } = useMemo(() => {
@@ -1489,6 +1555,15 @@ export default function LiquidityLadder() {
   const drawArrow = drawDirection?.includes('Up') ? '▲' : drawDirection?.includes('Down') ? '▼' : null;
   const drawColor = drawDirection?.includes('Up') ? 'text-cyan-400' : drawDirection?.includes('Down') ? 'text-orange-400' : '';
 
+  // ── Bias context strip ──────────────────────────────────────────────
+  // One glanceable header surfacing signals already computed elsewhere:
+  // active kill zone, draw direction, order-flow pressure and session phase.
+  const orderFlow = calculateOrderFlow(priceLine);
+  const killZoneNow = getActiveKillZone();
+  const sessionNow = getSessionProgress();
+  const flowLean = orderFlow.buyPressure >= 60 ? 'buy'
+    : orderFlow.sellPressure >= 60 ? 'sell' : 'balanced';
+
   return (
     <div
       ref={containerRef}
@@ -1512,6 +1587,80 @@ export default function LiquidityLadder() {
         transition: 'opacity 2s ease',
       }}
     >
+      {/* Bias context strip — glanceable session/flow/draw/kill-zone header */}
+      <div className="absolute top-1 left-1 z-30 flex items-center gap-1.5 pointer-events-none">
+        {/* Kill zone */}
+        <span className={cn('text-[8px] px-1.5 py-0.5 rounded border whitespace-nowrap',
+          killZoneNow.active ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+          : killZoneNow.approaching ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+          : 'bg-terminal-surface border-terminal-border text-slate-500'
+        )}>
+          {killZoneNow.label}{killZoneNow.approaching ? ' (soon)' : ''}
+        </span>
+        {/* Draw direction */}
+        {drawArrow && (
+          <span className={cn('text-[8px] px-1.5 py-0.5 rounded border border-terminal-border bg-terminal-surface whitespace-nowrap', drawColor)}>
+            {drawArrow} draw {drawDirection?.includes('Up') ? 'BSL' : 'SSL'}
+          </span>
+        )}
+        {/* Order-flow pressure */}
+        <span className={cn('text-[8px] px-1.5 py-0.5 rounded border whitespace-nowrap',
+          flowLean === 'buy' ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+          : flowLean === 'sell' ? 'bg-orange-500/15 border-orange-500/40 text-orange-300'
+          : 'bg-terminal-surface border-terminal-border text-slate-500'
+        )}>
+          {flowLean === 'buy' ? `▲ buy ${orderFlow.buyPressure}%`
+            : flowLean === 'sell' ? `▼ sell ${orderFlow.sellPressure}%`
+            : `⇄ ${orderFlow.buyPressure}/${orderFlow.sellPressure}`}
+        </span>
+        {/* Session phase */}
+        {sessionNow.inSession && (
+          <span className="text-[8px] px-1.5 py-0.5 rounded border border-terminal-border bg-terminal-surface text-slate-400 whitespace-nowrap">
+            {getPhaseLabel(sessionNow.phase)} · {sessionNow.timeRemaining} left
+          </span>
+        )}
+        {/* Distance to draw target */}
+        {drawProjection && (
+          <span className={cn('text-[8px] px-1.5 py-0.5 rounded border whitespace-nowrap',
+            drawProjection.up ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+            : 'bg-orange-500/15 border-orange-500/40 text-orange-300'
+          )}
+          title={`Nearest unswept ${drawProjection.up ? 'buy-side' : 'sell-side'} pool in the draw direction: ${drawProjection.target.name || drawProjection.target.pool_type} @ ${drawProjection.target.price.toFixed(2)}`}>
+            🎯 {drawProjection.points.toFixed(1)}pts to draw{drawProjection.eta ? ` · ~${drawProjection.eta}` : ''}
+          </span>
+        )}
+      </div>
+
+      {/* Smart level suggestions — ghost rungs with one-click add / dismiss */}
+      {suggestionsOn && smartSuggestions.map((s) => {
+        const pct = priceToPercent(s.price);
+        if (pct < 0 || pct > 100) return null;
+        const isBSL = s.side === 'Buy-Side';
+        return (
+          <div key={`sug-${s.type}-${s.price}`}
+            className="absolute left-12 right-10 z-[35] flex items-center gap-1 pointer-events-auto"
+            style={{ top: `${pct}%`, transform: 'translateY(-50%)' }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}>
+            <div className={cn('flex-1 h-px border-t border-dashed', isBSL ? 'border-cyan-400/40' : 'border-orange-400/40')} />
+            <span className={cn('text-[8px] px-1 py-0.5 rounded border whitespace-nowrap',
+              isBSL ? 'text-cyan-300/80 border-cyan-500/30 bg-cyan-950/40' : 'text-orange-300/80 border-orange-500/30 bg-orange-950/40'
+            )} title={s.reason}>
+              💡 {s.type} @ {s.price.toFixed(1)}
+            </span>
+            <button onClick={() => acceptSuggestion(s)}
+              title={s.reason}
+              aria-label={`Add suggested level ${s.type} at ${s.price.toFixed(1)}`}
+              className="text-[8px] px-1 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25">
+              + add
+            </button>
+            <button onClick={() => dismissSuggestion(s)}
+              aria-label="Dismiss suggestion"
+              className="text-[9px] leading-none text-slate-500 hover:text-white px-0.5">✕</button>
+          </div>
+        );
+      })}
+
       {/* Click-to-set armed banner */}
       {pickField && (
         <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 px-3 py-1.5 rounded-lg border border-purple-400/70 bg-purple-950/90 shadow-xl">
@@ -1825,6 +1974,21 @@ export default function LiquidityLadder() {
           )}
         >
           🔔 Alerts
+        </button>
+        <button
+          onClick={() => setSuggestionsOn(v => !v)}
+          aria-label="Toggle smart level suggestions" aria-pressed={suggestionsOn}
+          title={suggestionsOn
+            ? 'Smart suggestions ON — ghost rungs at repeatedly-visited prices & unmarked session extremes. Click + to add.'
+            : 'Smart suggestions — surface likely liquidity levels from price history'}
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            suggestionsOn
+              ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300'
+              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          💡 ideas
         </button>
         <button
           onClick={() => setShowShortcuts(s => !s)}
