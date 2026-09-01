@@ -430,6 +430,21 @@ export default function LiquidityLadder() {
   // speed so the ETAs stay steady instead of jumping on every tick.
   const smoothedSpeedRef = useRef(0);
   const [smoothedSpeed, setSmoothedSpeed] = useState(0);
+  // User-adjustable smoothing. Lower alpha = smoother/slower to react; higher
+  // = snappier. Stored as a 1–100 "responsiveness" for a friendly slider and
+  // mapped to an EMA alpha of ~0.02–0.40. Persisted.
+  const [smoothResponse, setSmoothResponse] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('lh_ladder_smooth'));
+      return Number.isFinite(v) && v >= 1 && v <= 100 ? v : 30;
+    } catch { return 30; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_smooth', String(smoothResponse)); } catch {}
+  }, [smoothResponse]);
+  // Map 1–100 → alpha 0.02–0.40 (linear). 30 ≈ 0.135 (~old default).
+  const smoothAlphaRef = useRef(0.135);
+  smoothAlphaRef.current = 0.02 + (smoothResponse / 100) * 0.38;
 
   // #12: Drag-to-edit state
   const [dragEditLevel, setDragEditLevel] = useState(null);
@@ -858,9 +873,9 @@ export default function LiquidityLadder() {
     const vel = calculateVelocity(priceLineRef.current);
     setVelocity(vel);
 
-    // Smoothed speed via EMA (alpha ~0.12 ≈ 30–45s effective window at ~1Hz).
-    // Steady magnitude for projection ETAs; raw velocity still drives chevrons.
-    const alpha = 0.12;
+    // Smoothed speed via EMA. Alpha is user-adjustable (smoothing slider):
+    // steady magnitude for projection ETAs; raw velocity still drives chevrons.
+    const alpha = smoothAlphaRef.current;
     smoothedSpeedRef.current = smoothedSpeedRef.current === 0
       ? vel.speed
       : smoothedSpeedRef.current + alpha * (vel.speed - smoothedSpeedRef.current);
@@ -1828,6 +1843,15 @@ export default function LiquidityLadder() {
           </span>
         </div>
       )}
+      {/* Displacement legend — shows only while a displacement move is on the line */}
+      {(displacements || []).some(d => d.sweepTime && d.displacementTime && d.displacementTime > d.sweepTime) && (
+        <div className="absolute bottom-6 right-1 z-[7] pointer-events-none flex items-center gap-1.5 bg-terminal-bg/70 px-1.5 py-0.5 rounded">
+          <span className="text-[7px] text-slate-500">displacement:</span>
+          <span className="flex items-center gap-0.5 text-[7px] text-cyan-300"><span className="inline-block w-2 h-0.5 rounded bg-cyan-400" /> bull</span>
+          <span className="flex items-center gap-0.5 text-[7px] text-orange-300"><span className="inline-block w-2 h-0.5 rounded bg-orange-400" /> bear</span>
+        </div>
+      )}
+
       {/* Live mode selected but no OHLC arriving from the extension */}
       {candleMode === 'live' && (!liveOHLC || candles.length < 2) && (
         <div className="absolute bottom-6 left-1 z-[3] pointer-events-none">
@@ -2021,6 +2045,25 @@ export default function LiquidityLadder() {
               </button>
             ))}
           </div>
+          {/* Projection smoothing slider — only meaningful when projection is on */}
+          {projectionOn && (
+            <div className="mt-2 pt-2 border-t border-terminal-border">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[9px] text-slate-400">⏱ Projection smoothing</span>
+                <span className="text-[8px] text-slate-600 tabular-nums">
+                  {smoothResponse <= 33 ? 'smooth' : smoothResponse >= 67 ? 'snappy' : 'balanced'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] text-slate-600">slow</span>
+                <input type="range" min="1" max="100" step="1" value={smoothResponse}
+                  onChange={(e) => setSmoothResponse(parseInt(e.target.value))}
+                  aria-label="Projection smoothing responsiveness"
+                  className="flex-1 h-4 accent-teal-400 cursor-pointer" />
+                <span className="text-[8px] text-slate-600">fast</span>
+              </div>
+            </div>
+          )}
           <div className="text-[8px] text-slate-600 mt-1.5 pt-1.5 border-t border-terminal-border">
             Tip: press <kbd className="px-1 rounded bg-slate-800 border border-terminal-border font-mono">?</kbd> for keyboard shortcuts.
           </div>
@@ -2355,12 +2398,40 @@ export default function LiquidityLadder() {
               const glowColor = priceUp ? 'rgba(16,185,129,0.28)' : 'rgba(239,68,68,0.28)';
               const end = points[points.length - 1];
 
+              // Displacement segments: highlight the portion of the line between
+              // a displacement's sweep origin and its displacement point, so you
+              // can see WHERE displacement happened. Bullish = cyan, bearish = orange.
+              const dispSegments = (displacements || [])
+                .filter(d => d.sweepTime && d.displacementTime && d.displacementTime > d.sweepTime)
+                .map(d => {
+                  const seg = points.filter((_, idx) =>
+                    priceLine[idx].time >= d.sweepTime && priceLine[idx].time <= d.displacementTime);
+                  if (seg.length < 2) return null;
+                  return {
+                    id: d.id,
+                    d: seg.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' '),
+                    bullish: d.direction === 'bullish',
+                  };
+                })
+                .filter(Boolean);
+
               return (
                 <>
                   {/* Glow underlay */}
                   <path d={pathD} fill="none" stroke={glowColor} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
                   {/* Main line */}
                   <path d={pathD} fill="none" stroke={lineColor} strokeWidth="0.7" strokeLinejoin="round" strokeLinecap="round" />
+                  {/* Displacement segments drawn on top with a thicker, brighter stroke */}
+                  {dispSegments.map(seg => (
+                    <g key={seg.id}>
+                      <path d={seg.d} fill="none"
+                        stroke={seg.bullish ? 'rgba(34,211,238,0.35)' : 'rgba(251,146,60,0.35)'}
+                        strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+                      <path d={seg.d} fill="none"
+                        stroke={seg.bullish ? '#22d3ee' : '#fb923c'}
+                        strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
+                    </g>
+                  ))}
                   {/* End point emphasis */}
                   <circle cx={end.x} cy={end.y} r="1.4" fill={priceUp ? '#10b981' : '#ef4444'}
                     stroke="#0b0f14" strokeWidth="0.4" />
