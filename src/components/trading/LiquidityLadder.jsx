@@ -1288,6 +1288,11 @@ export default function LiquidityLadder() {
   }, [suggestionsOn]);
   const [dismissedSuggestions, setDismissedSuggestions] = useState({}); // rounded price -> true
 
+  // Settings popover — declutters the toolbar by tucking the toggle-style
+  // controls (blur, snap, what-if, density, layers, focus, ideas, alerts,
+  // shortcuts) behind a single ⚙ button.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   useEffect(() => {
     const onKey = (e) => {
       const t = e.target;
@@ -1826,75 +1831,6 @@ export default function LiquidityLadder() {
           className="h-5 px-1.5 rounded bg-terminal-surface border border-terminal-border text-[8px] text-slate-500 hover:text-teal-400 flex items-center justify-center">⊙ Reset</button>
         <span className="text-[8px] text-slate-600 ml-1">{zoom.toFixed(1)}x</span>
         <button
-          onClick={() => setBlurEnabled(prev => !prev)}
-          aria-label="Toggle depth-of-field blur" aria-pressed={blurEnabled}
-          title={blurEnabled ? 'Depth-of-field blur ON — click to turn off' : 'Depth-of-field blur OFF — click to turn on'}
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            blurEnabled
-              ? 'bg-teal-500/20 border-teal-500/50 text-teal-400'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          {blurEnabled ? '🔵 blur' : '⚪ blur'}
-        </button>
-        <button
-          onClick={() => setSnapEnabled(prev => !prev)}
-          aria-label="Toggle snap-to-price" aria-pressed={snapEnabled}
-          title={snapEnabled
-            ? 'Snap-to-price ON — new/dragged levels snap to nearby levels, session H/L, price & round numbers (hold Alt to bypass)'
-            : 'Snap-to-price OFF — levels land exactly where you place them'}
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            snapEnabled
-              ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          {snapEnabled ? '🧲 snap' : '🧲 off'}
-        </button>
-        <button
-          onClick={toggleWhatIf}
-          aria-label="Toggle What-If preview mode" aria-pressed={whatIfActive}
-          title={whatIfActive
-            ? 'What-If mode ON — move the cursor to preview which levels would be swept (no data is changed). Click to exit.'
-            : 'What-If mode — preview which levels a hypothetical price would sweep'}
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            whatIfActive
-              ? 'bg-purple-500/25 border-purple-400/60 text-purple-200'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          🔮 What-If
-        </button>
-        <button
-          onClick={() => setDensity(prev => prev === 'comfortable' ? 'compact' : 'comfortable')}
-          aria-label="Toggle text size" aria-pressed={comfortable}
-          title={comfortable ? 'Larger text ON — click for compact text' : 'Compact text — click for larger, more readable text'}
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            comfortable
-              ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          {comfortable ? '🔎 large' : '🔎 text'}
-        </button>
-        <button
-          onClick={() => setLayersOpen(o => !o)}
-          aria-label="Show or hide overlay layers" aria-expanded={layersOpen}
-          title="Show/hide overlays (zones, patterns, trails, heatmap, mini-map)"
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            layersOpen
-              ? 'bg-slate-500/25 border-slate-400/60 text-slate-200'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          ▤ Layers
-        </button>
-        <button
           onClick={() => setFocusMode(f => !f)}
           aria-label="Toggle focus mode" aria-pressed={focusMode}
           title={focusMode
@@ -1963,47 +1899,54 @@ export default function LiquidityLadder() {
           📏 measure
         </button>
         <button
-          onClick={() => setAlertsOpen(o => !o)}
-          aria-label="Alert settings (sound and notifications)" aria-expanded={alertsOpen}
-          title="Enable sound and browser notifications for alerts"
+          onClick={() => setSettingsOpen(o => !o)}
+          aria-label="Ladder settings" aria-expanded={settingsOpen}
+          title="Settings — display toggles, overlays, alerts & shortcuts"
           className={cn(
             'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            (soundOn || notifyOn)
-              ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          🔔 Alerts
-        </button>
-        <button
-          onClick={() => setSuggestionsOn(v => !v)}
-          aria-label="Toggle smart level suggestions" aria-pressed={suggestionsOn}
-          title={suggestionsOn
-            ? 'Smart suggestions ON — ghost rungs at repeatedly-visited prices & unmarked session extremes. Click + to add.'
-            : 'Smart suggestions — surface likely liquidity levels from price history'}
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            suggestionsOn
-              ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300'
-              : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
-          )}
-        >
-          💡 ideas
-        </button>
-        <button
-          onClick={() => setShowShortcuts(s => !s)}
-          aria-label="Keyboard shortcuts" aria-pressed={showShortcuts}
-          title="Keyboard shortcuts (press ? anytime)"
-          className={cn(
-            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
-            showShortcuts
+            settingsOpen
               ? 'bg-slate-500/25 border-slate-400/60 text-slate-200'
               : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
           )}
         >
-          ⌨ ?
+          ⚙ settings
         </button>
       </div>
+
+      {/* Settings popover — tucks the toggle-style controls away to declutter */}
+      {settingsOpen && (
+        <div className="absolute top-8 left-1/2 -translate-x-1/2 z-[140] bg-terminal-bg/97 border border-terminal-border rounded-md shadow-2xl p-2.5 w-[220px]"
+          role="group" aria-label="Ladder settings"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-bold text-slate-300">⚙ Ladder Settings</span>
+            <button onClick={() => setSettingsOpen(false)} aria-label="Close settings"
+              className="text-slate-500 hover:text-white text-[11px] leading-none">✕</button>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {[
+              { on: blurEnabled, label: '🔵 Blur', off: '⚪ Blur', onClick: () => setBlurEnabled(v => !v), active: 'bg-teal-500/20 border-teal-500/50 text-teal-300' },
+              { on: snapEnabled, label: '🧲 Snap', off: '🧲 Snap off', onClick: () => setSnapEnabled(v => !v), active: 'bg-amber-500/20 border-amber-500/50 text-amber-300' },
+              { on: whatIfActive, label: '🔮 What-If', off: '🔮 What-If', onClick: toggleWhatIf, active: 'bg-purple-500/25 border-purple-400/60 text-purple-200' },
+              { on: comfortable, label: '🔎 Large text', off: '🔎 Compact', onClick: () => setDensity(p => p === 'comfortable' ? 'compact' : 'comfortable'), active: 'bg-sky-500/20 border-sky-500/50 text-sky-300' },
+              { on: layersOpen, label: '▤ Layers', off: '▤ Layers', onClick: () => setLayersOpen(o => !o), active: 'bg-slate-500/25 border-slate-400/60 text-slate-200' },
+              { on: suggestionsOn, label: '💡 Ideas', off: '💡 Ideas', onClick: () => setSuggestionsOn(v => !v), active: 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300' },
+              { on: (soundOn || notifyOn), label: '🔔 Alerts', off: '🔔 Alerts', onClick: () => setAlertsOpen(o => !o), active: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' },
+              { on: showShortcuts, label: '⌨ Shortcuts', off: '⌨ Shortcuts', onClick: () => setShowShortcuts(s => !s), active: 'bg-slate-500/25 border-slate-400/60 text-slate-200' },
+            ].map((b, i) => (
+              <button key={i} onClick={b.onClick} aria-pressed={b.on}
+                className={cn('h-6 px-1.5 rounded border text-[9px] flex items-center justify-center transition-colors',
+                  b.on ? b.active : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300')}>
+                {b.on ? b.label : b.off}
+              </button>
+            ))}
+          </div>
+          <div className="text-[8px] text-slate-600 mt-1.5 pt-1.5 border-t border-terminal-border">
+            Tip: press <kbd className="px-1 rounded bg-slate-800 border border-terminal-border font-mono">?</kbd> for keyboard shortcuts.
+          </div>
+        </div>
+      )}
 
       {/* Keyboard shortcuts cheatsheet */}
       {showShortcuts && (
