@@ -1375,6 +1375,19 @@ export default function LiquidityLadder() {
   // shortcuts) behind a single ⚙ button.
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Banner opacity — lets you fade the overlay banners (bias strip, A+, sweep
+  // outcome, pick prompt) so they don't obscure the chart/ladder. 40–100%.
+  const [bannerOpacity, setBannerOpacity] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('lh_ladder_banner_opacity'));
+      return Number.isFinite(v) && v >= 20 && v <= 100 ? v : 100;
+    } catch { return 100; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('lh_ladder_banner_opacity', String(bannerOpacity)); } catch {}
+  }, [bannerOpacity]);
+  const bannerStyle = { opacity: bannerOpacity / 100 };
+
   // Time projection — show an ETA badge on each level in the direction of
   // travel, estimated from current price speed. ON by default so the countdown
   // is visible out of the box; persisted (respects an explicit 'off').
@@ -1789,7 +1802,7 @@ export default function LiquidityLadder() {
       }}
     >
       {/* Bias context strip — glanceable session/flow/draw/kill-zone header */}
-      <div className="absolute top-1 left-1 z-30 flex items-center gap-1.5 pointer-events-none">
+      <div className="absolute top-1 left-1 z-30 flex items-center gap-1.5 pointer-events-none" style={bannerStyle}>
         {/* Kill zone */}
         <span className={cn('text-[8px] px-1.5 py-0.5 rounded border whitespace-nowrap',
           killZoneNow.active ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
@@ -1871,7 +1884,7 @@ export default function LiquidityLadder() {
 
       {/* Click-to-set armed banner */}
       {pickField && (
-        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 px-3 py-1.5 rounded-lg border border-purple-400/70 bg-purple-950/90 shadow-xl">
+        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[130] flex items-center gap-2 px-3 py-1.5 rounded-lg border border-purple-400/70 bg-purple-950/90 shadow-xl" style={bannerStyle}>
           <span className="text-[11px] font-bold uppercase tracking-wider text-purple-200 whitespace-nowrap">
             🖱️ Click to set {PICK_LABELS[pickField] || pickField}
           </span>
@@ -1883,7 +1896,7 @@ export default function LiquidityLadder() {
 
       {/* A+ Setup banner — prominent alert when confluence stacks near price */}
       {aPlusAlert && (
-        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[125] flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-400/70 bg-yellow-950/90 shadow-xl max-w-[92%] animate-pulse-glow">
+        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[125] flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-400/70 bg-yellow-950/90 shadow-xl max-w-[92%] animate-pulse-glow" style={bannerStyle}>
           <span className="text-base leading-none text-yellow-300">★</span>
           <div className="min-w-0">
             <div className="text-[10px] font-bold uppercase tracking-wider whitespace-nowrap text-yellow-200">
@@ -1909,7 +1922,7 @@ export default function LiquidityLadder() {
           ? { ring: 'border-emerald-500/70 bg-emerald-950/90', text: 'text-emerald-200', icon: '↩︎', head: 'SWEEP REVERSED' }
           : { ring: 'border-slate-500/60 bg-slate-900/90', text: 'text-slate-300', icon: '≈', head: 'SWEEP CHOP' };
         return (
-          <div className={cn('absolute top-9 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 px-3 py-2 rounded-lg border shadow-xl max-w-[92%] animate-pulse-glow', style.ring)}>
+          <div className={cn('absolute top-9 left-1/2 -translate-x-1/2 z-[120] flex items-center gap-2 px-3 py-2 rounded-lg border shadow-xl max-w-[92%] animate-pulse-glow', style.ring)} style={bannerStyle}>
             <span className={cn('text-base leading-none', style.text)}>{sweepOutcome.icon}</span>
             <div className="min-w-0">
               <div className={cn('text-[10px] font-bold uppercase tracking-wider whitespace-nowrap', style.text)}>{style.head}</div>
@@ -2192,6 +2205,17 @@ export default function LiquidityLadder() {
               </div>
             </div>
           )}
+          {/* Banner opacity — fade the overlay banners so they don't obscure the view */}
+          <div className="mt-2 pt-2 border-t border-terminal-border">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[9px] text-slate-400">🪟 Banner opacity</span>
+              <span className="text-[8px] text-slate-600 tabular-nums">{bannerOpacity}%</span>
+            </div>
+            <input type="range" min="20" max="100" step="5" value={bannerOpacity}
+              onChange={(e) => setBannerOpacity(parseInt(e.target.value))}
+              aria-label="Overlay banner opacity"
+              className="w-full h-4 accent-slate-400 cursor-pointer" />
+          </div>
           <div className="text-[8px] text-slate-600 mt-1.5 pt-1.5 border-t border-terminal-border">
             Tip: press <kbd className="px-1 rounded bg-slate-800 border border-terminal-border font-mono">?</kbd> for keyboard shortcuts.
           </div>
