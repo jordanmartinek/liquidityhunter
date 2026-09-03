@@ -433,6 +433,12 @@ export default function LiquidityLadder() {
   // speed so the ETAs stay steady instead of jumping on every tick.
   const smoothedSpeedRef = useRef(0);
   const [smoothedSpeed, setSmoothedSpeed] = useState(0);
+  // Signed smoothed velocity (pts/sec, + up / − down) — an EMA of the tick-to-tick
+  // delta. This gives a STABLE trend direction for projections, instead of the
+  // jittery 5-tick velocity.direction that flips on every noisy tick.
+  const smoothedVelRef = useRef(0);
+  const [smoothedVel, setSmoothedVel] = useState(0);
+  const lastTickForVelRef = useRef(null); // { price, time }
   // User-adjustable smoothing. Lower alpha = smoother/slower to react; higher
   // = snappier. Stored as a 1–100 "responsiveness" for a friendly slider and
   // mapped to an EMA alpha of ~0.02–0.40. Persisted.
@@ -902,9 +908,25 @@ export default function LiquidityLadder() {
     smoothedSpeedRef.current = smoothedSpeedRef.current === 0
       ? vel.speed
       : smoothedSpeedRef.current + alpha * (vel.speed - smoothedSpeedRef.current);
+
+    // Signed smoothed velocity: EMA of (price delta / time delta) between the
+    // last two ticks. Positive = trending up, negative = down. Stable enough to
+    // drive projections without flickering.
+    const prevTick = lastTickForVelRef.current;
+    const nowTs = Date.now();
+    if (prevTick) {
+      const dt = Math.max(0.001, (nowTs - prevTick.time) / 1000);
+      const instVel = (lastPrice - prevTick.price) / dt; // signed pts/sec
+      smoothedVelRef.current = smoothedVelRef.current === 0
+        ? instVel
+        : smoothedVelRef.current + alpha * (instVel - smoothedVelRef.current);
+    }
+    lastTickForVelRef.current = { price: lastPrice, time: nowTs };
+
     // Publish every few ticks to avoid excess re-renders.
     if (priceLineRef.current.length % 3 === 0) {
       setSmoothedSpeed(smoothedSpeedRef.current);
+      setSmoothedVel(smoothedVelRef.current);
     }
 
     // #10: Stall detection
@@ -1354,9 +1376,10 @@ export default function LiquidityLadder() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Time projection — show an ETA badge on each level in the direction of
-  // travel, estimated from current price speed. Off by default; persisted.
+  // travel, estimated from current price speed. ON by default so the countdown
+  // is visible out of the box; persisted (respects an explicit 'off').
   const [projectionOn, setProjectionOn] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_projection') === 'on'; } catch { return false; }
+    try { return localStorage.getItem('lh_ladder_projection') !== 'off'; } catch { return true; }
   });
   useEffect(() => {
     try { localStorage.setItem('lh_ladder_projection', projectionOn ? 'on' : 'off'); } catch {}
@@ -1582,23 +1605,26 @@ export default function LiquidityLadder() {
   // produce absurd numbers.
   const etaByLevel = useMemo(() => {
     const map = {};
-    // Use the smoothed (EMA) speed so ETAs are steady; direction stays live.
-    if (!projectionOn || lastPrice <= 0 || !velocity || smoothedSpeed < 0.05 || velocity.direction === 0) return map;
-    const movingUp = velocity.direction > 0;
+    if (!projectionOn || lastPrice <= 0) return map;
+    // Use the STABLE signed smoothed velocity for direction + magnitude, so the
+    // ETA doesn't flicker on noisy ticks. |smoothedVel| is the pts/sec used.
+    const trendSpeed = Math.abs(smoothedVel);
+    if (trendSpeed < 0.02) return map; // essentially flat — no meaningful ETA
+    const movingUp = smoothedVel > 0;
     for (const l of filteredLevels) {
       if (l.sweep_status === 'Swept') continue;
       const above = l.price > lastPrice;
       if ((above && !movingUp) || (!above && movingUp)) continue; // wrong direction
       const distance = Math.abs(l.price - lastPrice);
       if (distance < 0.5) continue;
-      const secs = distance / smoothedSpeed;
+      const secs = distance / trendSpeed;
       if (secs <= 0 || secs > 1800) continue; // > 30 min = not meaningful
       map[l.id] = secs < 60
         ? `${Math.round(secs)}s`
         : `${Math.floor(secs / 60)}m${Math.round(secs % 60).toString().padStart(2, '0')}s`;
     }
     return map;
-  }, [projectionOn, lastPrice, velocity, smoothedSpeed, filteredLevels]);
+  }, [projectionOn, lastPrice, smoothedVel, filteredLevels]);
 
   const allLevels = filteredLevels;
 
@@ -1725,8 +1751,9 @@ export default function LiquidityLadder() {
 
   // Nearest projected level (soonest ETA) for the glanceable bias-strip chip.
   const nextProjection = (() => {
-    if (!projectionOn || velocity.direction === 0) return null;
-    const movingUp = velocity.direction > 0;
+    if (!projectionOn) return null;
+    // Relies solely on etaByLevel (built from the stable smoothed velocity),
+    // so it stays in sync with the on-rung badges and doesn't flicker.
     let best = null;
     for (const l of filteredLevels) {
       if (l.sweep_status === 'Swept' || !etaByLevel[l.id]) continue;
