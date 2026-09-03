@@ -547,6 +547,46 @@ export default function LiquidityLadder() {
     });
   }, []);
 
+  // ── Drawing tools: horizontal lines & trendlines ────────────────────
+  // A drawing is stored transform-independently: X as a 0–1 fraction of width,
+  // Y as an actual price, so lines stay pinned to price across zoom/pan.
+  // { id, type: 'hline' | 'trend', x1, price1, x2, price2 }
+  const DRAW_KEY_BASE = 'lh_ladder_drawings';
+  const drawKey = `${DRAW_KEY_BASE}_${symbol || 'default'}`;
+  const [drawings, setDrawings] = useState([]);
+  // 'off' | 'hline' | 'trend' — the active drawing tool.
+  const [drawMode, setDrawMode] = useState('off');
+  const [drawInProgress, setDrawInProgress] = useState(null); // { x1, price1, x2, price2 }
+  const drawingRef = useRef(false);
+
+  // Load persisted drawings for the current symbol.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(drawKey) || '[]');
+      setDrawings(Array.isArray(saved) ? saved : []);
+    } catch { setDrawings([]); }
+  }, [drawKey]);
+  const persistDrawings = useCallback((next) => {
+    setDrawings(next);
+    try { localStorage.setItem(drawKey, JSON.stringify(next)); } catch {}
+  }, [drawKey]);
+  const clearDrawings = useCallback(() => persistDrawings([]), [persistDrawings]);
+  const undoDrawing = useCallback(() => {
+    setDrawings(prev => {
+      const next = prev.slice(0, -1);
+      try { localStorage.setItem(drawKey, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [drawKey]);
+  const cycleDrawMode = useCallback(() => {
+    // off → horizontal line → trendline → off
+    setDrawMode(m => (m === 'off' ? 'hline' : m === 'hline' ? 'trend' : 'off'));
+    setDrawInProgress(null);
+    drawingRef.current = false;
+  }, []);
+  const drawModeRef = useRef('off');
+  useEffect(() => { drawModeRef.current = drawMode; }, [drawMode]);
+
   // Click-to-set: when the Paper form arms a field ('entry'/'stop'/'target'/…),
   // the next click on the ladder captures that price and sends it back.
   const [pickField, setPickField] = useState(null);
@@ -817,6 +857,14 @@ export default function LiquidityLadder() {
     return { pct, price: percentToPrice(pct) };
   }, [percentToPrice]);
 
+  // clientX (px) → horizontal fraction (0–1) of the container width. Used for
+  // drawings so a line/trendline keeps its X anchor across resizes.
+  const clientXToFraction = useCallback((clientX) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0.5;
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }, []);
+
   // ── Snap-to-price ───────────────────────────────────────────────────
   // Candidate anchors are mirrored into a ref so the snap helper stays stable.
   const snapAnchorsRef = useRef({ levels: [], session: null, lastPrice: 0 });
@@ -1083,6 +1131,17 @@ export default function LiquidityLadder() {
       }
       return;
     }
+    // Drawing tools: begin a line/trendline from this point (suspends panning)
+    if (drawModeRef.current !== 'off') {
+      const res = clientYToPrice(e.clientY);
+      if (res) {
+        const x = clientXToFraction(e.clientX);
+        const price = maybeSnap(res.price, e).price;
+        drawingRef.current = true;
+        setDrawInProgress({ x1: x, price1: price, x2: x, price2: price });
+      }
+      return;
+    }
     setIsDragging(true);
     dragStartRef.current = { y: e.clientY, x: e.clientX, panAtStart: panOffset, xPanAtStart: xPan };
   };
@@ -1106,6 +1165,21 @@ export default function LiquidityLadder() {
       if (measuringRef.current) {
         const res = clientYToPrice(e.clientY);
         if (res) setMeasureCurrent(res);
+      }
+      return;
+    }
+
+    // Drawing: extend the in-progress line/trendline while dragging
+    if (drawModeRef.current !== 'off') {
+      if (drawingRef.current) {
+        const res = clientYToPrice(e.clientY);
+        if (res) {
+          const x = clientXToFraction(e.clientX);
+          const price = maybeSnap(res.price, e).price;
+          setDrawInProgress(prev => prev ? { ...prev, x2: x, price2: price } : prev);
+          const s = maybeSnap(res.price, e);
+          setSnapHint(s.label ? { pct: res.pct, label: s.label } : null);
+        }
       }
       return;
     }
@@ -1169,6 +1243,25 @@ export default function LiquidityLadder() {
       measuringRef.current = false;
       return;
     }
+
+    // Drawing: commit the line/trendline. A horizontal line ignores the drag
+    // (uses the anchor price across the full width); a trendline uses both ends.
+    if (drawModeRef.current !== 'off' && drawingRef.current && drawInProgress) {
+      drawingRef.current = false;
+      const d = drawInProgress;
+      let drawing;
+      if (drawModeRef.current === 'hline') {
+        drawing = { id: `dl_${Date.now()}`, type: 'hline', x1: 0, price1: d.price1, x2: 1, price2: d.price1 };
+      } else {
+        // Ignore an accidental click with no drag (degenerate zero-length line).
+        const moved = Math.abs(d.x2 - d.x1) > 0.01 || Math.abs(d.price2 - d.price1) > 0.01;
+        drawing = moved ? { id: `dl_${Date.now()}`, type: 'trend', ...d } : null;
+      }
+      if (drawing) persistDrawings([...drawings, drawing]);
+      setDrawInProgress(null);
+      setSnapHint(null);
+      return;
+    }
     // #12: Complete drag-to-edit
     if (dragEditLevel && dragEditY !== null) {
       const containerRect = containerRef.current?.getBoundingClientRect();
@@ -1200,7 +1293,7 @@ export default function LiquidityLadder() {
 
   // #21: Quick-add level (double-click on ladder)
   const handleDoubleClick = useCallback((e) => {
-    if (measureMode) return; // don't quick-add while measuring
+    if (measureMode || drawModeRef.current !== 'off') return; // don't quick-add while measuring/drawing
     const res = clientYToPrice(e.clientY);
     if (!res) return;
     const snapped = maybeSnap(res.price, e);
@@ -1796,7 +1889,7 @@ export default function LiquidityLadder() {
       onDoubleClick={handleDoubleClick}
       onClick={closeContextMenu}
       style={{
-        cursor: (pickField || measureMode) ? 'crosshair' : (dragEditLevel || dragTrade) ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
+        cursor: (pickField || measureMode || drawMode !== 'off') ? 'crosshair' : (dragEditLevel || dragTrade) ? 'ns-resize' : isDragging ? 'grabbing' : 'grab',
         opacity: killZoneOpacity,
         transition: 'opacity 2s ease',
       }}
@@ -2141,6 +2234,37 @@ export default function LiquidityLadder() {
         >
           📏 measure
         </button>
+        <button
+          onClick={cycleDrawMode}
+          aria-label="Drawing tool" aria-pressed={drawMode !== 'off'}
+          title={
+            drawMode === 'off' ? 'Draw OFF — click for horizontal line tool'
+            : drawMode === 'hline' ? 'Horizontal line: click anywhere to drop a line at that price — click for trendline tool'
+            : 'Trendline: drag from A to B to draw a sloped line — click to turn off'
+          }
+          className={cn(
+            'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+            drawMode === 'hline' ? 'bg-fuchsia-500/25 border-fuchsia-400/60 text-fuchsia-200'
+            : drawMode === 'trend' ? 'bg-fuchsia-500/25 border-fuchsia-400/60 text-fuchsia-200'
+            : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+          )}
+        >
+          {drawMode === 'off' ? '✏️ draw' : drawMode === 'hline' ? '✏️ line' : '✏️ trend'}
+        </button>
+        {drawings.length > 0 && (
+          <>
+            <button onClick={undoDrawing}
+              aria-label="Undo last drawing" title="Undo last drawing"
+              className="h-5 px-1.5 rounded border border-terminal-border bg-terminal-surface text-[8px] text-slate-500 hover:text-slate-300 ml-1 flex items-center justify-center">
+              ↶ undo
+            </button>
+            <button onClick={clearDrawings}
+              aria-label="Clear all drawings" title="Clear all drawings"
+              className="h-5 px-1.5 rounded border border-terminal-border bg-terminal-surface text-[8px] text-slate-500 hover:text-red-400 ml-1 flex items-center justify-center">
+              🗑 clear
+            </button>
+          </>
+        )}
         <button
           onClick={() => setSettingsOpen(o => !o)}
           aria-label="Ladder settings" aria-expanded={settingsOpen}
@@ -2544,6 +2668,54 @@ export default function LiquidityLadder() {
 
       {/* Rungs + Price Line (SAME container so coordinates match) */}
       <div className="absolute inset-0 top-5 bottom-5" role="list" aria-label="Liquidity levels">
+        {/* Drawings overlay — user lines & trendlines (pinned to price) */}
+        {(drawings.length > 0 || drawInProgress) && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none z-[7]" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {drawings.map(d => {
+              const y1 = priceToPercent(d.price1);
+              const y2 = priceToPercent(d.type === 'hline' ? d.price1 : d.price2);
+              const x1 = (d.type === 'hline' ? 0 : d.x1) * 100;
+              const x2 = (d.type === 'hline' ? 1 : d.x2) * 100;
+              return (
+                <line key={d.id} x1={x1} y1={y1} x2={x2} y2={y2}
+                  stroke="#e879f9" strokeWidth="0.4" strokeLinecap="round"
+                  strokeDasharray={d.type === 'hline' ? '1.5 1' : undefined}
+                  vectorEffect="non-scaling-stroke" opacity="0.85" />
+              );
+            })}
+            {/* In-progress preview */}
+            {drawInProgress && (() => {
+              const isH = drawModeRef.current === 'hline';
+              const y1 = priceToPercent(drawInProgress.price1);
+              const y2 = priceToPercent(isH ? drawInProgress.price1 : drawInProgress.price2);
+              const x1 = (isH ? 0 : drawInProgress.x1) * 100;
+              const x2 = (isH ? 1 : drawInProgress.x2) * 100;
+              return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#f0abfc" strokeWidth="0.5"
+                strokeDasharray="1 1" strokeLinecap="round" vectorEffect="non-scaling-stroke" />;
+            })()}
+          </svg>
+        )}
+        {/* Drawing price labels + delete buttons (HTML for crisp text) */}
+        {drawings.map(d => {
+          const isH = d.type === 'hline';
+          const yPct = priceToPercent(isH ? d.price1 : Math.max(d.price1, d.price2));
+          if (yPct < -2 || yPct > 102) return null;
+          const labelPrice = isH ? d.price1 : d.price2;
+          return (
+            <div key={`lbl-${d.id}`}
+              className="absolute z-[9] flex items-center gap-1 -translate-y-1/2 pointer-events-auto"
+              style={{ left: `${(isH ? 0.5 : d.x2) * 100}%`, top: `${priceToPercent(labelPrice)}%` }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}>
+              <span className="text-[8px] font-mono px-1 py-px rounded bg-fuchsia-950/80 border border-fuchsia-500/40 text-fuchsia-200 tabular-nums">
+                {labelPrice.toFixed(1)}
+              </span>
+              <button onClick={() => persistDrawings(drawings.filter(x => x.id !== d.id))}
+                aria-label="Delete drawing"
+                className="text-[9px] leading-none text-fuchsia-400/70 hover:text-red-400">✕</button>
+            </div>
+          );
+        })}
         {/* Price Line SVG */}
         {priceLine.length > 5 && priceMarkerPercent !== null && (
           <svg className="absolute inset-0 w-full h-full pointer-events-none z-[6]" viewBox="0 0 100 100" preserveAspectRatio="none">
