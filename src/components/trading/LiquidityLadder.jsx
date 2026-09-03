@@ -165,12 +165,7 @@ function Rung({
             {sweepProb}%
           </span>
         )}
-        {/* Time projection: ETA to reach this level at the current speed */}
-        {eta && !isSwept && (
-          <span className="text-[7px] tabular-nums font-mono text-teal-400 block" title={`At the current speed & direction, price reaches this level in about ${eta}`}>
-            ⏱{eta}
-          </span>
-        )}
+
       </div>
 
       {/* Rung bar */}
@@ -263,6 +258,14 @@ function Rung({
           <span className={cn('tabular-nums font-mono ml-1', comfortable ? 'text-[11px]' : 'text-[8px]', isSwept ? 'text-slate-700' : 'text-slate-400')}>
             {level.price.toFixed(0)}
           </span>
+          {/* Time-to-reach countdown — prominent, right on the level banner */}
+          {eta && !isSwept && (
+            <span className={cn('shrink-0 ml-1 px-1 py-px rounded font-mono font-bold tabular-nums bg-teal-500/25 text-teal-200 border border-teal-400/40 flex items-center gap-0.5',
+              comfortable ? 'text-[10px]' : 'text-[8px]')}
+              title={`At the current speed & direction, price reaches this level in about ${eta}`}>
+              ⏱ {eta}
+            </span>
+          )}
         </div>
 
         {/* Time-at-Level bar (below rung) */}
@@ -1425,6 +1428,68 @@ export default function LiquidityLadder() {
   }, [magnetZones, equalHL]);
   const htfCorroborated = useMemo(() => findHTFCorroboration(filteredLevels), [filteredLevels]);
 
+  // ── A+ confluence detection ─────────────────────────────────────────
+  // A level counts as "A+" when several edges stack (confluence score ≥ 4)
+  // AND price is within striking distance, so the alert only fires for setups
+  // that are actually actionable right now.
+  const APLUS_PROXIMITY_PTS = 25;
+  const aPlusLevels = useMemo(() => {
+    if (lastPrice <= 0) return [];
+    const kz = getActiveKillZone();
+    const out = [];
+    for (const l of filteredLevels) {
+      if (l.sweep_status === 'Swept') continue;
+      if (Math.abs(l.price - lastPrice) > APLUS_PROXIMITY_PTS) continue;
+      const sweepProb = calculateSweepProbability(l, lastPrice, drawDirection, timeAtLevel[l.id] || 0);
+      const conf = computeConfluence(l, {
+        inCluster: clusteredIds.has(l.id),
+        inKillZone: kz.active,
+        sweepProb,
+        htfCorroborated: htfCorroborated.has(l.id),
+      });
+      if (conf.score >= 4) out.push({ level: l, confluence: conf, sweepProb });
+    }
+    // Strongest first
+    return out.sort((a, b) => b.confluence.score - a.confluence.score);
+  }, [filteredLevels, lastPrice, drawDirection, timeAtLevel, clusteredIds, htfCorroborated]);
+
+  // Prominent A+ alert banner + fire-once sound/notification per level.
+  const [aPlusAlert, setAPlusAlert] = useState(null); // { levelId, name, price, score, reasons }
+  const aPlusSeenRef = useRef({}); // levelId -> true while it stays A+ (re-arms when it drops)
+  useEffect(() => {
+    const currentIds = new Set(aPlusLevels.map(a => a.level.id));
+    // Re-arm any level that dropped out of A+ so it can alert again later.
+    for (const id of Object.keys(aPlusSeenRef.current)) {
+      if (!currentIds.has(id)) delete aPlusSeenRef.current[id];
+    }
+    // Fire once for a newly-qualifying A+ level (take the strongest).
+    const fresh = aPlusLevels.find(a => !aPlusSeenRef.current[a.level.id]);
+    if (fresh) {
+      aPlusSeenRef.current[fresh.level.id] = true;
+      const name = fresh.level.name || fresh.level.pool_type || 'level';
+      setAPlusAlert({
+        levelId: fresh.level.id,
+        name,
+        price: fresh.level.price,
+        score: fresh.confluence.score,
+        reasons: fresh.confluence.reasons,
+      });
+      try { if (soundOnRef.current) { ladderAudio.init(); ladderAudio.entryBell?.(); } } catch {}
+      try {
+        if (notifyOnRef.current) {
+          sendNotification('★ A+ Setup', `${name} @ ${fresh.level.price.toFixed(2)} — ${fresh.confluence.reasons.join(', ')}`, 'lh_aplus');
+        }
+      } catch {}
+    }
+  }, [aPlusLevels]);
+
+  // Auto-dismiss the A+ banner after a bit.
+  useEffect(() => {
+    if (!aPlusAlert) return;
+    const t = setTimeout(() => setAPlusAlert(null), 12000);
+    return () => clearTimeout(t);
+  }, [aPlusAlert]);
+
   // ── What-If mode analysis ───────────────────────────────────────────
   // For a hypothetical price, compute which active levels would be swept and
   // how their sweep probabilities shift. Pure preview — never mutates data.
@@ -1768,6 +1833,24 @@ export default function LiquidityLadder() {
           <button onClick={() => { setPickField(null); try { window.dispatchEvent(new CustomEvent('lh:cancel-pick')); } catch {} }}
             aria-label="Cancel picking"
             className="text-purple-300 hover:text-white text-[11px] leading-none">✕</button>
+        </div>
+      )}
+
+      {/* A+ Setup banner — prominent alert when confluence stacks near price */}
+      {aPlusAlert && (
+        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-[125] flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-400/70 bg-yellow-950/90 shadow-xl max-w-[92%] animate-pulse-glow">
+          <span className="text-base leading-none text-yellow-300">★</span>
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wider whitespace-nowrap text-yellow-200">
+              A+ SETUP · confluence {aPlusAlert.score}
+            </div>
+            <div className="text-[9px] text-slate-300 truncate">
+              {aPlusAlert.name} @ {aPlusAlert.price.toFixed(2)} · {aPlusAlert.reasons.join(', ')}
+            </div>
+          </div>
+          <button onClick={() => setAPlusAlert(null)}
+            aria-label="Dismiss A+ setup alert"
+            className="ml-1 shrink-0 text-slate-400 hover:text-white text-[11px] leading-none">✕</button>
         </div>
       )}
 
