@@ -681,6 +681,18 @@ export default function LiquidityLadder() {
   const [notifyOn, setNotifyOn] = useState(() => {
     try { return typeof Notification !== 'undefined' && Notification.permission === 'granted'; } catch { return false; }
   });
+  // Webhook (push to phone via ntfy.sh / Pushover / generic). Persisted in the
+  // engine's own localStorage key; mirror it here for the settings field.
+  const [webhookUrl, setWebhookUrl] = useState(() => {
+    try { return webhookAlerts.getUrl() || ''; } catch { return ''; }
+  });
+  const [webhookStatus, setWebhookStatus] = useState(null); // null | 'sending' | 'ok' | 'fail'
+  const saveWebhook = useCallback((url) => {
+    setWebhookUrl(url);
+    try { webhookAlerts.setUrl(url.trim()); } catch {}
+  }, []);
+  const webhookOnRef = useRef(false);
+  useEffect(() => { webhookOnRef.current = !!(webhookUrl && webhookUrl.trim()); }, [webhookUrl]);
   // Keep live refs so the per-tick alert path can fire sound/notifications without re-subscribing.
   const notifyOnRef = useRef(notifyOn);
   useEffect(() => { notifyOnRef.current = notifyOn; }, [notifyOn]);
@@ -715,7 +727,15 @@ export default function LiquidityLadder() {
   const testAlerts = useCallback(() => {
     try { if (soundOn) { ladderAudio.init(); ladderAudio.entryBell?.(); } } catch {}
     try { if (notifyOnRef.current) sendNotification('🔔 Liquidity Hunter', 'Test alert — alerts are working.', 'lh_test'); } catch {}
-  }, [soundOn]);
+    // Test the webhook too (bypass the 1-min cooldown so the test always sends).
+    if (webhookUrl && webhookUrl.trim()) {
+      setWebhookStatus('sending');
+      try { webhookAlerts.lastSent = 0; } catch {}
+      webhookAlerts.send('🔔 Liquidity Hunter', 'Test alert — your webhook is working.')
+        .then(ok => setWebhookStatus(ok ? 'ok' : 'fail'))
+        .catch(() => setWebhookStatus('fail'));
+    }
+  }, [soundOn, webhookUrl]);
 
   // Simulation mode: when there's no live price feed, generate a gentle
   // random-walk price so the ladder is usable for demos/testing. Never runs
@@ -941,12 +961,12 @@ export default function LiquidityLadder() {
       // Sound + notification for the actionable outcomes only (skip chop noise).
       if (r.status === 'continuation' || r.status === 'reversal') {
         try { if (soundOnRef.current) { ladderAudio.init(); r.status === 'reversal' ? ladderAudio.sweep?.(levelId) : ladderAudio.displacement?.(); } } catch {}
-        try {
-          if (notifyOnRef.current) {
-            const title = r.status === 'continuation' ? '↠ Sweep FAILED — continuation' : '↩︎ Sweep reversed';
-            sendNotification(title, `${levelName} @ ${levelPrice.toFixed(2)} (${r.movePts} pts)`, 'lh_sweep_outcome');
-          }
-        } catch {}
+        {
+          const title = r.status === 'continuation' ? '↠ Sweep FAILED — continuation' : '↩︎ Sweep reversed';
+          const body = `${levelName} @ ${levelPrice.toFixed(2)} (${r.movePts} pts)`;
+          try { if (notifyOnRef.current) sendNotification(title, body, 'lh_sweep_outcome'); } catch {}
+          try { if (webhookOnRef.current) webhookAlerts.send(title, body); } catch {}
+        }
       }
     }
     if (priceLineRef.current.length % 5 === 0) {
@@ -1474,12 +1494,10 @@ export default function LiquidityLadder() {
         score: fresh.confluence.score,
         reasons: fresh.confluence.reasons,
       });
+      const body = `${name} @ ${fresh.level.price.toFixed(2)} — ${fresh.confluence.reasons.join(', ')}`;
       try { if (soundOnRef.current) { ladderAudio.init(); ladderAudio.entryBell?.(); } } catch {}
-      try {
-        if (notifyOnRef.current) {
-          sendNotification('★ A+ Setup', `${name} @ ${fresh.level.price.toFixed(2)} — ${fresh.confluence.reasons.join(', ')}`, 'lh_aplus');
-        }
-      } catch {}
+      try { if (notifyOnRef.current) sendNotification('★ A+ Setup', body, 'lh_aplus'); } catch {}
+      try { if (webhookOnRef.current) webhookAlerts.send('★ A+ Setup', body); } catch {}
     }
   }, [aPlusLevels]);
 
@@ -2196,7 +2214,7 @@ export default function LiquidityLadder() {
 
       {/* Alerts panel */}
       {alertsOpen && (
-        <div className="absolute top-8 right-1 z-40 bg-terminal-bg/95 border border-terminal-border rounded-md p-2 shadow-xl min-w-[150px]" role="group" aria-label="Alert settings"
+        <div className="absolute top-8 right-1 z-40 bg-terminal-bg/95 border border-terminal-border rounded-md p-2 shadow-xl w-[190px]" role="group" aria-label="Alert settings"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}>
           <div className="text-[9px] font-bold text-slate-300 mb-1">Alerts</div>
@@ -2220,9 +2238,30 @@ export default function LiquidityLadder() {
               ? <span className="text-emerald-400 text-[8px]">on</span>
               : <button onClick={enableNotifications} className="text-[8px] px-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200">Enable</button>}
           </div>
+
+          {/* Push-to-phone webhook (ntfy.sh / Pushover / generic) */}
+          <div className="mt-1 pt-1 border-t border-terminal-border">
+            <div className="flex items-center justify-between text-[9px] text-slate-300">
+              <span>📲 Push to phone</span>
+              {webhookOnRef.current && <span className="text-emerald-400 text-[8px]">on</span>}
+            </div>
+            <input type="url" inputMode="url" spellCheck={false}
+              value={webhookUrl}
+              onChange={(e) => saveWebhook(e.target.value)}
+              placeholder="https://ntfy.sh/your-topic"
+              aria-label="Webhook URL for phone push alerts"
+              className="mt-0.5 w-full text-[8px] px-1 py-0.5 rounded bg-terminal-bg border border-terminal-border text-slate-300 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/50" />
+            <div className="text-[7px] text-slate-500 mt-0.5 leading-tight">
+              Paste an <span className="text-slate-400">ntfy.sh/&lt;topic&gt;</span> or Pushover URL. Fires on A+, sweep outcome &amp; SFP (1/min max).
+              {webhookStatus === 'sending' && <span className="text-slate-400"> · sending…</span>}
+              {webhookStatus === 'ok' && <span className="text-emerald-400"> · sent ✓</span>}
+              {webhookStatus === 'fail' && <span className="text-red-400"> · failed ✕</span>}
+            </div>
+          </div>
+
           <button onClick={testAlerts}
             className="mt-1 w-full text-[8px] px-1 py-0.5 rounded bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-600/50">
-            Test alert
+            Test alert{webhookUrl && webhookUrl.trim() ? ' (+ webhook)' : ''}
           </button>
           <div className="text-[7px] text-slate-500 mt-1 leading-tight">Sound needs one click to unlock; notifications ask for permission.</div>
         </div>
