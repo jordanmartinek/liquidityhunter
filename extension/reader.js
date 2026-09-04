@@ -53,7 +53,23 @@ function extractOHLC() {
 }
 
 function extractPrice() {
-  // Priority 1: Bid/Ask buttons — update tick-by-tick
+  // Priority 1: LAST-TRADED price (OHLC legend Close).
+  // This is the value the candles are drawn from and the value that sweeps a
+  // level on the chart, so the ladder's price line matches what you see sweep.
+  // (Previously this used the bid/ask MIDPOINT, which sits ~half a spread away
+  // from the printed trades — so levels appeared to sweep on the chart before
+  // the ladder line "reached" them. Using Close fixes that alignment.)
+  const legendValues = document.querySelectorAll('[class*="valueValue"]');
+  if (legendValues.length >= 4) {
+    const closeText = legendValues[3].textContent.trim().replace(/[,\s]/g, '');
+    const closePrice = parseFloat(closeText);
+    if (closePrice > 1000 && closePrice < 50000 && !isNaN(closePrice)) {
+      return closePrice;
+    }
+  }
+
+  // Priority 2: Bid/Ask buttons (fallback) — used only when the legend Close
+  // isn't readable. Returns the midpoint, which is close enough as a fallback.
   const buttons = document.querySelectorAll('[class*="buttonText"]');
   const buttonPrices = [];
   for (const el of buttons) {
@@ -70,15 +86,7 @@ function extractPrice() {
     return buttonPrices[0];
   }
 
-  // Priority 2: OHLC legend values
-  const legendValues = document.querySelectorAll('[class*="valueValue"]');
-  if (legendValues.length >= 4) {
-    const closeText = legendValues[3].textContent.trim().replace(/[,\s]/g, '');
-    const closePrice = parseFloat(closeText);
-    if (closePrice > 1000 && closePrice < 50000 && !isNaN(closePrice)) {
-      return closePrice;
-    }
-  }
+  // Priority 3: any other numeric legend cell (last resort before brute force)
   for (const el of legendValues) {
     const text = el.textContent.trim().replace(/[,\s]/g, '');
     const price = parseFloat(text);
@@ -164,7 +172,7 @@ function poll() {
   }
 }
 
-console.log('[LH Bridge] Reader active — writing to chrome.storage every 1s');
+console.log('[LH Bridge] Reader active v1.6.0 — price = last-traded (legend Close); writing every 1s');
 showStatus(false);
 setInterval(poll, POLL_INTERVAL);
 setTimeout(poll, 2000);

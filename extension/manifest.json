@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LiquidityHunter Price Bridge",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Streams live price + OHLC + volume from TradingView to the LiquidityHunter app",
   "permissions": ["storage"],
   "content_scripts": [
