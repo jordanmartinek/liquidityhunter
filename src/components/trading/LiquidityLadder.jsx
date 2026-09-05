@@ -580,6 +580,9 @@ export default function LiquidityLadder() {
   });
   const [candleOpacity, setCandleOpacity] = usePersistentState('lh_ladder_candle_opacity', 0.15, numberCodec({ valid: (n) => n >= 0.05 && n <= 0.6 }));
   const [candleInterval, setCandleInterval] = usePersistentState('lh_ladder_candle_interval', 30, numberCodec({ int: true, valid: (n) => [15, 30, 60].includes(n) }));
+  // TradingView overlay interactivity: when on, the TV widget comes to the
+  // front and takes pointer events so you can change timeframe/zoom on it.
+  const [chartInteractive, setChartInteractive] = usePersistentState('lh_ladder_chart_interactive', false, onOffCodec);
   const cycleCandleMode = useCallback(() => {
     // off → aligned (synthetic) → live (real OHLC from extension) → tv → off
     setCandleMode(m => (m === 'off' ? 'aligned' : m === 'aligned' ? 'live' : m === 'live' ? 'tv' : 'off'));
@@ -1965,10 +1968,13 @@ export default function LiquidityLadder() {
         );
       })()}
 
-      {/* Candle overlay — TradingView (not aligned) behind the ladder */}
+      {/* Candle overlay — TradingView (not aligned). When interactive it moves
+          in front of the ladder and takes pointer events so you can use TV's
+          own toolbar (timeframe/zoom); otherwise it's a click-through backdrop. */}
       {candleMode === 'tv' && (
-        <div className="absolute inset-0 z-0 pointer-events-none">
-          <TradingViewChart overlay opacity={candleOpacity} />
+        <div className={cn('absolute inset-0',
+          chartInteractive ? 'z-50 pointer-events-auto' : 'z-0 pointer-events-none')}>
+          <TradingViewChart overlay interactive={chartInteractive} opacity={chartInteractive ? Math.max(candleOpacity, 0.85) : candleOpacity} />
         </div>
       )}
 
@@ -2070,8 +2076,9 @@ export default function LiquidityLadder() {
         </div>
       )}
 
-      {/* Zoom controls */}
-      <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1" role="toolbar" aria-label="Ladder view controls">
+      {/* Zoom controls — kept above the interactive chart overlay (z-50) so the
+          toggle is always reachable. */}
+      <div className="absolute top-1 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-1" role="toolbar" aria-label="Ladder view controls">
         <button onClick={() => setZoom(prev => Math.min(15, prev + 0.3))}
           aria-label="Zoom in" title="Zoom in"
           className="w-5 h-5 rounded bg-terminal-surface border border-terminal-border text-[10px] text-slate-400 hover:text-white flex items-center justify-center">+</button>
@@ -2153,6 +2160,23 @@ export default function LiquidityLadder() {
             title={`Candle opacity: ${Math.round(candleOpacity * 100)}%`}
             aria-label="Candle overlay opacity"
             className="w-14 h-5 ml-1 accent-orange-400 cursor-pointer" />
+        )}
+        {candleMode === 'tv' && (
+          <button
+            onClick={() => setChartInteractive(v => !v)}
+            aria-label="Toggle interactive chart" aria-pressed={chartInteractive}
+            title={chartInteractive
+              ? 'Interactive chart ON — use TradingView\u2019s toolbar to change timeframe/zoom. Click to return to overlay mode.'
+              : 'Make the TradingView chart interactive (change timeframe / zoom on it directly)'}
+            className={cn(
+              'h-5 px-1.5 rounded border text-[8px] flex items-center justify-center ml-1 transition-colors',
+              chartInteractive
+                ? 'bg-orange-500/25 border-orange-400/60 text-orange-200'
+                : 'bg-terminal-surface border-terminal-border text-slate-500 hover:text-slate-300'
+            )}
+          >
+            {chartInteractive ? '🖱️ chart on' : '🖱️ interact'}
+          </button>
         )}
         <button
           onClick={toggleMeasure}

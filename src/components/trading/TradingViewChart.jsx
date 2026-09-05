@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useResearch } from '@/lib/researchStore';
 import { TV_SYMBOL_MAP } from '@/lib/constants';
 
-export default function TradingViewChart({ overlay = false, opacity = 1 }) {
+export default function TradingViewChart({ overlay = false, opacity = 1, interactive = false }) {
   const { symbol } = useResearch();
   const containerRef = useRef(null);
   const widgetId = useRef(`tv_chart_${Date.now()}`);
@@ -39,12 +39,15 @@ export default function TradingViewChart({ overlay = false, opacity = 1 }) {
           locale: 'en',
           toolbar_bg: '#070b12',
           enable_publishing: false,
-          allow_symbol_change: !overlay,
+          allow_symbol_change: !overlay || interactive,
           save_image: false,
-          hide_side_toolbar: overlay ? true : false,
-          hide_top_toolbar: overlay ? true : false,
-          hide_legend: overlay ? true : false,
-          withdateranges: !overlay,
+          // In interactive overlay mode show TradingView's own toolbars so the
+          // user can change timeframe / zoom via the widget's native UI (the
+          // iframe is cross-origin, so we can't drive it programmatically).
+          hide_side_toolbar: overlay && !interactive,
+          hide_top_toolbar: overlay && !interactive,
+          hide_legend: overlay && !interactive,
+          withdateranges: !overlay || interactive,
           drawings_access: { type: 'all' },
           studies: [],
           overrides: {
@@ -68,15 +71,17 @@ export default function TradingViewChart({ overlay = false, opacity = 1 }) {
         script.parentNode.removeChild(script);
       }
     };
-  }, [tvSymbol, overlay]);
+  }, [tvSymbol, overlay, interactive]);
 
-  // When used as a subtle overlay on the ladder: no border, click-through,
-  // and caller-controlled opacity.
+  // When used as a subtle overlay on the ladder: no border and caller-controlled
+  // opacity. Click-through by default so the ladder stays usable — UNLESS
+  // interactive, in which case pointer events pass to the TradingView widget so
+  // you can change timeframe / zoom on it directly.
   if (overlay) {
     return (
       <div
         className="w-full h-full"
-        style={{ opacity, pointerEvents: 'none' }}
+        style={{ opacity, pointerEvents: interactive ? 'auto' : 'none' }}
       >
         <div ref={containerRef} className="w-full h-full" />
       </div>
