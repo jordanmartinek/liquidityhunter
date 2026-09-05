@@ -149,8 +149,14 @@ export default function PaperTradePanel() {
     setMaxDDLimit(p.maxDD);
     setLockoutCleared(false);
   };
-  // $ per point for the active instrument (falls back to 1 if unknown).
-  const pointValue = (INSTRUMENTS.find(i => i.symbol === symbol)?.point_value) || 1;
+  // $ per point for the active instrument. If the symbol isn't a known
+  // instrument we must NOT silently default to 1 — that would make every
+  // dollar figure (P&L, equity, max-DD, daily-loss lockouts) wrong by a
+  // 20–50x factor and could defeat the risk guardrails. Instead we flag it
+  // and block trade submission until a known instrument is selected.
+  const activeInstrument = INSTRUMENTS.find(i => i.symbol === symbol) || null;
+  const knownInstrument = !!activeInstrument;
+  const pointValue = activeInstrument?.point_value || 1; // 1 only as a display placeholder while blocked
   const [form, setForm] = useState({
     direction: 'long',
     entry: '',
@@ -404,14 +410,14 @@ export default function PaperTradePanel() {
   // Directional per-contract $ moved from entry to an exit price.
   const legDollars = (t, exitPrice, qty) => {
     const dir = t.direction === 'long' ? 1 : -1;
-    const pv = t.pointValue || 1;
+    const pv = t.pointValue || pointValue; // stored pv preferred; else current instrument
     return (exitPrice - t.entry) * dir * pv * qty;
   };
 
   // Total realized dollars for a resolved trade, including any partial
   // scale-outs plus the close of the remaining size.
   const realizedDollars = (t) => {
-    const pv = t.pointValue || 1;
+    const pv = t.pointValue || pointValue;
     const totalQty = t.contracts || 1;
     const scaled = (t.scaleOuts || []).reduce((sum, s) => sum + legDollars(t, s.price, s.qty), 0);
     const scaledQty = (t.scaleOuts || []).reduce((sum, s) => sum + s.qty, 0);
@@ -483,6 +489,7 @@ export default function PaperTradePanel() {
   const handleSubmit = () => {
     if (lockedOut) return; // daily loss limit hit — no new trades
     if (disciplineBlock) return; // discipline gate not satisfied
+    if (!knownInstrument) return; // unknown symbol → point value unknown, block
     // Entry defaults to the current (market) price if left blank.
     const entry = parseFloat(form.entry) || lastPrice || 0;
     const stop = parseFloat(form.stop) || 0;
@@ -993,6 +1000,13 @@ export default function PaperTradePanel() {
               placeholder="Quick note: what did you see?"
               className="w-full h-7 px-1.5 bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-300 focus:outline-none focus:border-purple-400/50" />
 
+            {/* Unknown-instrument guard: point value unknown → $ math would be
+                wrong, so block execution and say why. */}
+            {!knownInstrument && (
+              <div className="text-[9px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1 text-center">
+                ⚠️ Unknown instrument “{symbol || '—'}” — dollar P&L &amp; risk limits can't be calculated. Pick NQ/MNQ/ES/MES to trade.
+              </div>
+            )}
             {/* Discipline gate reason (blocks execute) */}
             {disciplineBlock && (
               <div className="text-[9px] text-red-300 bg-red-500/10 border border-red-500/30 rounded px-2 py-1 text-center">
@@ -1001,7 +1015,7 @@ export default function PaperTradePanel() {
             )}
             {/* Actions */}
             <div className="flex gap-1">
-              <button onClick={handleSubmit} disabled={!form.stop || !form.target || !!disciplineBlock}
+              <button onClick={handleSubmit} disabled={!form.stop || !form.target || !!disciplineBlock || !knownInstrument}
                 className="flex-1 py-1.5 rounded text-[10px] font-semibold bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed">
                 📝 Paper Execute
               </button>
