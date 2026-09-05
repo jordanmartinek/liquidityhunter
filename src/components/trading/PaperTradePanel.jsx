@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useResearch } from '@/lib/researchStore';
 import { INSTRUMENTS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import { etHour } from '@/lib/time';
 
 const STORAGE_KEY = 'lh_paper_trades';
 const SIZE_KEY = 'lh_paper_size';
@@ -121,18 +122,11 @@ export default function PaperTradePanel() {
   const RULES_THRESHOLD = 70;
 
   // NY session window: unlocks 30 min before 09:30 ET open, locks at 16:00 ET.
-  // Uses the browser's America/New_York wall clock.
-  const nyHour = () => {
-    try {
-      const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
-      const h = parseInt(p.find(x => x.type === 'hour')?.value || '0', 10);
-      const m = parseInt(p.find(x => x.type === 'minute')?.value || '0', 10);
-      return h + m / 60;
-    } catch { return 12; }
-  };
+  // Uses the shared America/New_York wall-clock helper (etHour) — one source
+  // of truth for ET time across the app (kill zones, session levels, this).
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setNowTick(n => n + 1), 30000); return () => clearInterval(t); }, []);
-  const inTradingWindow = (() => { const h = nyHour(); return h >= 9.0 && h < 16.0; })(); // 30m pre-open → close
+  const inTradingWindow = (() => { const h = etHour(); return h >= 9.0 && h < 16.0; })(); // 30m pre-open → close
 
   // Post-loss cooldown (5 min after a loss). Persisted timestamp.
   const [cooldownUntil, setCooldownUntil] = useState(() => {
