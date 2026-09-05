@@ -29,6 +29,7 @@ import { alertZoneManager } from '@/lib/bangerFeatures';
 import { hasPatternManager } from '@/lib/headAndShoulders';
 import DailyRangeMeter from './DailyRangeMeter';
 import TradingViewChart from './TradingViewChart';
+import LevelPeekWindow from './LevelPeekWindow';
 import {
   sfpDetector,
   detectLiquidityVoids,
@@ -583,6 +584,13 @@ export default function LiquidityLadder() {
   // TradingView overlay interactivity: when on, the TV widget comes to the
   // front and takes pointer events so you can change timeframe/zoom on it.
   const [chartInteractive, setChartInteractive] = usePersistentState('lh_ladder_chart_interactive', false, onOffCodec);
+
+  // Level peek window: when on, price reaching (wicking) a level pops a small
+  // live mini-chart of the action around that level's band. Off by default.
+  const [peekOn, setPeekOn] = usePersistentState('lh_ladder_peek', false, onOffCodec);
+  // The level currently being peeked (most recently reached). { id, level }
+  const [peekLevel, setPeekLevel] = useState(null);
+  const peekDismissedRef = useRef(null); // levelId the user closed; re-arms when price leaves
   const cycleCandleMode = useCallback(() => {
     // off → aligned (synthetic) → live (real OHLC from extension) → tv → off
     setCandleMode(m => (m === 'off' ? 'aligned' : m === 'aligned' ? 'live' : m === 'live' ? 'tv' : 'off'));
@@ -1672,6 +1680,32 @@ export default function LiquidityLadder() {
 
   const allLevels = filteredLevels;
 
+  // ── Level peek window driver ─────────────────────────────────────────
+  // When enabled, find the level whose price the current bar's wick has reached
+  // (BSL above → high; SSL below → low) and pop a peek for it. Auto-dismiss when
+  // price leaves the band; honor a manual close until price leaves & returns.
+  useEffect(() => {
+    if (!peekOn || !liveOHLC || lastPrice <= 0) { setPeekLevel(null); return; }
+    let reached = null;
+    for (const l of filteredLevels) {
+      if (l.sweep_status === 'Swept') continue;
+      const hit = (l.price > lastPrice && liveOHLC.high >= l.price) ||
+                  (l.price < lastPrice && liveOHLC.low <= l.price) ||
+                  Math.abs(l.price - lastPrice) <= 2; // also peek when sitting on it
+      if (hit) {
+        // Prefer the nearest reached level to the current price.
+        if (!reached || Math.abs(l.price - lastPrice) < Math.abs(reached.price - lastPrice)) reached = l;
+      }
+    }
+    if (!reached) { peekDismissedRef.current = null; setPeekLevel(null); return; }
+    if (peekDismissedRef.current === reached.id) return; // user closed this one; wait until it clears
+    setPeekLevel(prev => (prev?.id === reached.id ? prev : { id: reached.id, level: reached }));
+  }, [peekOn, liveOHLC, lastPrice, filteredLevels]);
+
+  const closePeek = useCallback(() => {
+    setPeekLevel(prev => { if (prev) peekDismissedRef.current = prev.id; return null; });
+  }, []);
+
   // Smart level suggestions (only when toggled on). Recomputed as the tick
   // history grows; dismissed suggestions are filtered out until reload.
   const smartSuggestions = useMemo(() => {
@@ -1832,6 +1866,19 @@ export default function LiquidityLadder() {
         transition: 'opacity 2s ease',
       }}
     >
+      {/* Level peek window — live mini-chart of action around a reached level */}
+      {peekOn && peekLevel && (
+        <div className="absolute bottom-9 right-1 z-[55]">
+          <LevelPeekWindow
+            level={peekLevel.level}
+            priceLine={priceLine}
+            liveOHLC={liveOHLC}
+            lastPrice={lastPrice}
+            onClose={closePeek}
+          />
+        </div>
+      )}
+
       {/* Bias context strip — glanceable session/flow/draw/kill-zone header */}
       <div className="absolute top-1 left-1 z-30 flex items-center gap-1.5 pointer-events-none" style={bannerStyle}>
         {/* Kill zone */}
@@ -2259,6 +2306,7 @@ export default function LiquidityLadder() {
               { on: layersOpen, label: '▤ Layers', off: '▤ Layers', onClick: () => setLayersOpen(o => !o), active: 'bg-slate-500/25 border-slate-400/60 text-slate-200' },
               { on: suggestionsOn, label: '💡 Ideas', off: '💡 Ideas', onClick: () => setSuggestionsOn(v => !v), active: 'bg-yellow-500/20 border-yellow-500/50 text-yellow-300' },
               { on: projectionOn, label: '⏱ Projection', off: '⏱ Projection', onClick: () => setProjectionOn(v => !v), active: 'bg-teal-500/20 border-teal-500/50 text-teal-300' },
+              { on: peekOn, label: '🔎 Peek', off: '🔎 Peek', onClick: () => setPeekOn(v => !v), active: 'bg-fuchsia-500/20 border-fuchsia-500/50 text-fuchsia-300' },
               { on: (soundOn || notifyOn), label: '🔔 Alerts', off: '🔔 Alerts', onClick: () => setAlertsOpen(o => !o), active: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' },
               { on: showShortcuts, label: '⌨ Shortcuts', off: '⌨ Shortcuts', onClick: () => setShowShortcuts(s => !s), active: 'bg-slate-500/25 border-slate-400/60 text-slate-200' },
             ].map((b, i) => (
