@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { getStrengthConfig } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import { usePersistentState, onOffCodec, onUnlessOffCodec, stringCodec, numberCodec, jsonCodec } from '@/hooks/usePersistentState';
 import {
   calculateAgeDecay,
   calculateVelocity,
@@ -391,35 +392,10 @@ export default function LiquidityLadder() {
 
   // Zoom & Pan state — persisted so navigating away to the chart and back
   // (which unmounts/remounts this component) keeps your zoom/pan in place.
-  const [zoom, setZoom] = useState(() => {
-    try {
-      const v = parseFloat(localStorage.getItem('lh_ladder_zoom'));
-      return Number.isFinite(v) && v > 0 ? v : 1;
-    } catch { return 1; }
-  });
-  const [panOffset, setPanOffset] = useState(() => {
-    try {
-      const v = parseFloat(localStorage.getItem('lh_ladder_pan'));
-      return Number.isFinite(v) ? v : 0;
-    } catch { return 0; }
-  });
+  const [zoom, setZoom] = usePersistentState('lh_ladder_zoom', 1, numberCodec({ valid: (n) => n > 0 }));
+  const [panOffset, setPanOffset] = usePersistentState('lh_ladder_pan', 0, numberCodec());
   // Horizontal pan: shifts the price line left (0 = flush right, higher = more empty space on the right)
-  const [xPan, setXPan] = useState(() => {
-    try {
-      const v = parseFloat(localStorage.getItem('lh_ladder_xpan'));
-      return Number.isFinite(v) ? v : 0;
-    } catch { return 0; }
-  });
-  // Persist zoom/pan on change (debounced via the browser's microtask batching).
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_zoom', String(zoom)); } catch {}
-  }, [zoom]);
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_pan', String(panOffset)); } catch {}
-  }, [panOffset]);
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_xpan', String(xPan)); } catch {}
-  }, [xPan]);
+  const [xPan, setXPan] = usePersistentState('lh_ladder_xpan', 0, numberCodec());
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ y: 0, x: 0, panAtStart: 0, xPanAtStart: 0 });
   // Touch: pinch-to-zoom + long-press-to-open-context-menu bookkeeping
@@ -448,15 +424,7 @@ export default function LiquidityLadder() {
   // User-adjustable smoothing. Lower alpha = smoother/slower to react; higher
   // = snappier. Stored as a 1–100 "responsiveness" for a friendly slider and
   // mapped to an EMA alpha of ~0.02–0.40. Persisted.
-  const [smoothResponse, setSmoothResponse] = useState(() => {
-    try {
-      const v = parseInt(localStorage.getItem('lh_ladder_smooth'));
-      return Number.isFinite(v) && v >= 1 && v <= 100 ? v : 30;
-    } catch { return 30; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_smooth', String(smoothResponse)); } catch {}
-  }, [smoothResponse]);
+  const [smoothResponse, setSmoothResponse] = usePersistentState('lh_ladder_smooth', 30, numberCodec({ int: true, valid: (n) => n >= 1 && n <= 100 }));
   // Map 1–100 → alpha 0.02–0.40 (linear). 30 ≈ 0.135 (~old default).
   const smoothAlphaRef = useRef(0.135);
   smoothAlphaRef.current = 0.02 + (smoothResponse / 100) * 0.38;
@@ -489,48 +457,29 @@ export default function LiquidityLadder() {
 
   // Snap-to-price: when adding/dragging levels, snap to nearby anchors
   // (existing levels, session H/L, current price, round numbers). On by default.
-  const [snapEnabled, setSnapEnabled] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_snap') !== 'off'; } catch { return true; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_snap', snapEnabled ? 'on' : 'off'); } catch {}
-  }, [snapEnabled]);
+  const [snapEnabled, setSnapEnabled] = usePersistentState('lh_ladder_snap', true, onUnlessOffCodec);
   // Transient hint showing what we snapped to (e.g. "▸ 4210 (level)")
   const [snapHint, setSnapHint] = useState(null);
 
   // Text density / readability. 'comfortable' bumps the tiny 6–9px text up a
   // notch for accessibility. Persisted. Default keeps the current 'compact'.
-  const [density, setDensity] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_density') === 'comfortable' ? 'comfortable' : 'compact'; } catch { return 'compact'; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_density', density); } catch {}
-  }, [density]);
+  const [density, setDensity] = usePersistentState('lh_ladder_density', 'compact', stringCodec);
   const comfortable = density === 'comfortable';
 
   // Layer visibility — lets you declutter the ladder while marking levels.
   // All on by default; persisted to localStorage.
   const defaultLayers = { zones: true, patterns: true, trails: true, heatmap: true, minimap: true };
-  const [layers, setLayers] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('lh_ladder_layers') || '{}');
-      return { ...defaultLayers, ...saved };
-    } catch { return defaultLayers; }
+  // Merge stored partial layer prefs over defaults (so new layer keys default on).
+  const [layers, setLayers] = usePersistentState('lh_ladder_layers', defaultLayers, {
+    parse: (raw) => ({ ...defaultLayers, ...(JSON.parse(raw) || {}) }),
+    serialize: (v) => JSON.stringify(v),
   });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_layers', JSON.stringify(layers)); } catch {}
-  }, [layers]);
   const [layersOpen, setLayersOpen] = useState(false);
   const toggleLayer = useCallback((key) => setLayers(prev => ({ ...prev, [key]: !prev[key] })), []);
 
   // Focus / Zen mode — hides ALL overlay groups at once, leaving just the
   // price line, your levels (rungs) and the crosshair. Persisted.
-  const [focusMode, setFocusMode] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_focus') === 'on'; } catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_focus', focusMode ? 'on' : 'off'); } catch {}
-  }, [focusMode]);
+  const [focusMode, setFocusMode] = usePersistentState('lh_ladder_focus', false, onOffCodec);
   // Effective layer visibility: everything off while in focus mode.
   const effectiveLayers = useMemo(
     () => focusMode
@@ -615,22 +564,14 @@ export default function LiquidityLadder() {
   //  'aligned' — synthesized OHLC drawn on the ladder's own axis (approximate)
   //  'tv'      — the faint TradingView widget (own axis, not aligned)
   // Opacity adjustable. Persisted. Migrates the old boolean 'lh_ladder_candles'.
-  const [candleMode, setCandleMode] = useState(() => {
-    try {
-      const m = localStorage.getItem('lh_ladder_candle_mode');
-      if (m === 'off' || m === 'aligned' || m === 'tv') return m;
-      return localStorage.getItem('lh_ladder_candles') === 'on' ? 'tv' : 'off';
-    } catch { return 'off'; }
+  const [candleMode, setCandleMode] = usePersistentState('lh_ladder_candle_mode', 'off', {
+    parse: (m) => (m === 'off' || m === 'aligned' || m === 'live' || m === 'tv') ? m
+      // Migrate the old boolean key on first read of an unknown/missing value.
+      : (localStorage.getItem('lh_ladder_candles') === 'on' ? 'tv' : 'off'),
+    serialize: (v) => v,
   });
-  const [candleOpacity, setCandleOpacity] = useState(() => {
-    try { const n = parseFloat(localStorage.getItem('lh_ladder_candle_opacity')); return n >= 0.05 && n <= 0.6 ? n : 0.15; } catch { return 0.15; }
-  });
-  const [candleInterval, setCandleInterval] = useState(() => {
-    try { const n = parseInt(localStorage.getItem('lh_ladder_candle_interval')); return [15, 30, 60].includes(n) ? n : 30; } catch { return 30; }
-  });
-  useEffect(() => { try { localStorage.setItem('lh_ladder_candle_mode', candleMode); } catch {} }, [candleMode]);
-  useEffect(() => { try { localStorage.setItem('lh_ladder_candle_opacity', String(candleOpacity)); } catch {} }, [candleOpacity]);
-  useEffect(() => { try { localStorage.setItem('lh_ladder_candle_interval', String(candleInterval)); } catch {} }, [candleInterval]);
+  const [candleOpacity, setCandleOpacity] = usePersistentState('lh_ladder_candle_opacity', 0.15, numberCodec({ valid: (n) => n >= 0.05 && n <= 0.6 }));
+  const [candleInterval, setCandleInterval] = usePersistentState('lh_ladder_candle_interval', 30, numberCodec({ int: true, valid: (n) => [15, 30, 60].includes(n) }));
   const cycleCandleMode = useCallback(() => {
     // off → aligned (synthetic) → live (real OHLC from extension) → tv → off
     setCandleMode(m => (m === 'off' ? 'aligned' : m === 'aligned' ? 'live' : m === 'live' ? 'tv' : 'off'));
@@ -1449,24 +1390,11 @@ export default function LiquidityLadder() {
 
   // Default alert-zone band width (± points) for the "Add Alert Zone" action.
   // Persisted so your preferred width sticks; editable per-add via the prompt.
-  const [alertBandWidth, setAlertBandWidth] = useState(() => {
-    try {
-      const v = parseFloat(localStorage.getItem('lh_ladder_alert_band'));
-      return Number.isFinite(v) && v > 0 ? v : 5;
-    } catch { return 5; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_alert_band', String(alertBandWidth)); } catch {}
-  }, [alertBandWidth]);
+  const [alertBandWidth, setAlertBandWidth] = usePersistentState('lh_ladder_alert_band', 5, numberCodec({ valid: (n) => n > 0 }));
 
   // Smart level suggestions — ghost rungs at price areas visited repeatedly or
   // at session extremes not yet marked. Off by default; persisted.
-  const [suggestionsOn, setSuggestionsOn] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_suggestions') === 'on'; } catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_suggestions', suggestionsOn ? 'on' : 'off'); } catch {}
-  }, [suggestionsOn]);
+  const [suggestionsOn, setSuggestionsOn] = usePersistentState('lh_ladder_suggestions', false, onOffCodec);
   const [dismissedSuggestions, setDismissedSuggestions] = useState({}); // rounded price -> true
 
   // Settings popover — declutters the toolbar by tucking the toggle-style
@@ -1476,26 +1404,13 @@ export default function LiquidityLadder() {
 
   // Banner opacity — lets you fade the overlay banners (bias strip, A+, sweep
   // outcome, pick prompt) so they don't obscure the chart/ladder. 40–100%.
-  const [bannerOpacity, setBannerOpacity] = useState(() => {
-    try {
-      const v = parseInt(localStorage.getItem('lh_ladder_banner_opacity'));
-      return Number.isFinite(v) && v >= 20 && v <= 100 ? v : 100;
-    } catch { return 100; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_banner_opacity', String(bannerOpacity)); } catch {}
-  }, [bannerOpacity]);
+  const [bannerOpacity, setBannerOpacity] = usePersistentState('lh_ladder_banner_opacity', 100, numberCodec({ int: true, valid: (n) => n >= 20 && n <= 100 }));
   const bannerStyle = { opacity: bannerOpacity / 100 };
 
   // Time projection — show an ETA badge on each level in the direction of
   // travel, estimated from current price speed. ON by default so the countdown
   // is visible out of the box; persisted (respects an explicit 'off').
-  const [projectionOn, setProjectionOn] = useState(() => {
-    try { return localStorage.getItem('lh_ladder_projection') !== 'off'; } catch { return true; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem('lh_ladder_projection', projectionOn ? 'on' : 'off'); } catch {}
-  }, [projectionOn]);
+  const [projectionOn, setProjectionOn] = usePersistentState('lh_ladder_projection', true, onUnlessOffCodec);
 
   useEffect(() => {
     const onKey = (e) => {
