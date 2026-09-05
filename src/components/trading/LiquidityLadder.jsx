@@ -91,7 +91,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta, wickReached,
+  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta, wickReached, brightness = 1,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -109,14 +109,19 @@ function Rung({
   const isDispSwept = displacementState === 'swept';
   const isDisplaced = displacementState === 'displaced' || displacementState === 'pullback' || displacementState === 'at_avwap';
 
-  // Combined opacity: age decay * base
+  // Combined opacity: age decay * base, scaled by the user brightness setting
+  // (capped at 1; extra "pop" beyond that comes from the brightness() filter
+  // and a boosted glow below).
   const baseOpacity = isSwept ? 0.2 : isTested ? 0.65 : 1;
-  const finalOpacity = baseOpacity * ageOpacity;
+  const finalOpacity = Math.min(1, baseOpacity * ageOpacity * brightness);
 
-  // Glow box-shadow based on intensity
+  // Glow box-shadow based on intensity, amplified by brightness.
   const glowShadow = glowIntensity > 0.3 && !isSwept
-    ? `0 0 ${Math.round(glowIntensity * 12)}px ${Math.round(glowIntensity * 4)}px ${isBSL ? 'rgba(6,182,212,' : 'rgba(249,115,22,'}${(glowIntensity * 0.4).toFixed(2)})`
+    ? `0 0 ${Math.round(glowIntensity * 12 * brightness)}px ${Math.round(glowIntensity * 4 * brightness)}px ${isBSL ? 'rgba(6,182,212,' : 'rgba(249,115,22,'}${Math.min(0.9, glowIntensity * 0.4 * brightness).toFixed(2)})`
     : 'none';
+  // Above 1x, use a CSS brightness filter so levels genuinely get brighter
+  // once opacity is already maxed. (Combined with any depth-of-field blur.)
+  const brightnessFilter = brightness > 1 ? `brightness(${brightness.toFixed(2)})` : '';
 
   return (
     <div
@@ -130,7 +135,10 @@ function Rung({
         top: `${percent}%`,
         transform: 'translateY(-50%)',
         opacity: finalOpacity,
-        filter: blurEnabled && blurFactor > 0.3 ? `blur(${blurFactor.toFixed(1)}px)` : 'none',
+        filter: [
+          blurEnabled && blurFactor > 0.3 ? `blur(${blurFactor.toFixed(1)}px)` : '',
+          brightnessFilter,
+        ].filter(Boolean).join(' ') || 'none',
       }}
       role="listitem"
       aria-label={`${isBSL ? 'Buy-side' : 'Sell-side'} liquidity ${level.name || level.pool_type} at ${level.price.toFixed(2)}, ${level.sweep_status || 'Untouched'}${isImminent ? ', price imminent' : ''}`}
@@ -1407,6 +1415,12 @@ export default function LiquidityLadder() {
   const [bannerOpacity, setBannerOpacity] = usePersistentState('lh_ladder_banner_opacity', 100, numberCodec({ int: true, valid: (n) => n >= 20 && n <= 100 }));
   const bannerStyle = { opacity: bannerOpacity / 100 };
 
+  // Level brightness — how bright/prominent your level rungs render. Stored as
+  // a 50–200(%) so 100 = normal; boosts rung opacity, glow and (above 100) a
+  // CSS brightness filter. Persisted.
+  const [levelBrightness, setLevelBrightness] = usePersistentState('lh_ladder_level_brightness', 100, numberCodec({ int: true, valid: (n) => n >= 50 && n <= 200 }));
+  const brightnessFactor = levelBrightness / 100;
+
   // Time projection — show an ETA badge on each level in the direction of
   // travel, estimated from current price speed. ON by default so the countdown
   // is visible out of the box; persisted (respects an explicit 'off').
@@ -2250,6 +2264,18 @@ export default function LiquidityLadder() {
               </div>
             </div>
           )}
+          {/* Level brightness — how bright/prominent your level rungs render */}
+          <div className="mt-2 pt-2 border-t border-terminal-border">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[9px] text-slate-400">💡 Level brightness</span>
+              <span className="text-[8px] text-slate-600 tabular-nums">{levelBrightness}%</span>
+            </div>
+            <input type="range" min="50" max="200" step="10" value={levelBrightness}
+              onChange={(e) => setLevelBrightness(parseInt(e.target.value))}
+              aria-label="Level brightness"
+              className="w-full h-4 accent-cyan-400 cursor-pointer" />
+          </div>
+
           {/* Banner opacity — fade the overlay banners so they don't obscure the view */}
           <div className="mt-2 pt-2 border-t border-terminal-border">
             <div className="flex items-center justify-between mb-0.5">
@@ -2836,6 +2862,7 @@ export default function LiquidityLadder() {
               confluence={confluence}
               eta={etaByLevel[level.id] || null}
               wickReached={wickReached}
+              brightness={brightnessFactor}
             />
           );
         })}
