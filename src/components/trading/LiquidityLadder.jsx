@@ -90,7 +90,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta,
+  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta, wickReached,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -199,7 +199,8 @@ function Rung({
 
         <div
           className={cn('rounded-sm flex items-center justify-between px-1.5 transition-all cursor-grab active:cursor-grabbing',
-            isImminent && !isSwept && 'ring-1 ring-red-400/50 shadow-sm shadow-red-400/20',
+            wickReached && !isSwept && 'ring-2 ring-fuchsia-400/70 shadow-sm shadow-fuchsia-400/30 animate-pulse',
+            isImminent && !isSwept && !wickReached && 'ring-1 ring-red-400/50 shadow-sm shadow-red-400/20',
             isDisplaced && !isSwept && 'ring-1 ring-cyan-400/40 shadow-sm shadow-cyan-400/20',
             isDispSwept && !isSwept && 'ring-1 ring-amber-400/40 shadow-sm shadow-amber-400/20',
             isAutoSession && !isSwept && 'ring-1 ring-violet-400/30',
@@ -216,6 +217,10 @@ function Rung({
           }}
           onMouseDown={(e) => { e.stopPropagation(); onDragStart?.(e, level); }}
         >
+          {/* Wick-reached badge — the current bar's wick has touched this level */}
+          {wickReached && !isSwept && (
+            <span className="text-[7px] mr-0.5 font-bold text-fuchsia-300 animate-pulse" title="Wick has touched this level (bar not closed through it yet)">⤳</span>
+          )}
           {/* SFP badge */}
           {hasSFP && !isSwept && (
             <span className="text-[7px] mr-0.5 animate-pulse" title="Swing Failure Pattern detected">🔄</span>
@@ -2777,6 +2782,26 @@ export default function LiquidityLadder() {
                         strokeWidth="1.2" strokeLinejoin="round" strokeLinecap="round" />
                     </g>
                   ))}
+                  {/* Current-bar wick reach: a thin high↔low bar at the leading
+                     edge so you can see how far the wick has extended toward a
+                     level (a level is "reached" the moment the wick touches it,
+                     even before the bar closes). */}
+                  {liveOHLC && liveOHLC.high > 0 && liveOHLC.low > 0 && liveOHLC.high > liveOHLC.low && (() => {
+                    const yHigh = priceToPercent(liveOHLC.high);
+                    const yLow = priceToPercent(liveOHLC.low);
+                    return (
+                      <g>
+                        <line x1={end.x} x2={end.x} y1={yHigh} y2={yLow}
+                          stroke={priceUp ? 'rgba(16,185,129,0.55)' : 'rgba(239,68,68,0.55)'}
+                          strokeWidth="0.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                        {/* high & low ticks */}
+                        <line x1={end.x - 1} x2={end.x + 1} y1={yHigh} y2={yHigh}
+                          stroke={priceUp ? '#10b981' : '#ef4444'} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+                        <line x1={end.x - 1} x2={end.x + 1} y1={yLow} y2={yLow}
+                          stroke={priceUp ? '#10b981' : '#ef4444'} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+                      </g>
+                    );
+                  })()}
                   {/* End point emphasis */}
                   <circle cx={end.x} cy={end.y} r="1.4" fill={priceUp ? '#10b981' : '#ef4444'}
                     stroke="#0b0f14" strokeWidth="0.4" />
@@ -2814,6 +2839,12 @@ export default function LiquidityLadder() {
           const distanceFromPrice = lastPrice > 0 ? level.price - lastPrice : 0;
           const isImminent = lastPrice > 0 && Math.abs(distanceFromPrice) <= 5;
           const isConfluence = confluenceLevels.has(level.id);
+          // Wick reach: has the current bar's high/low touched this level even
+          // though the close hasn't crossed it? (BSL above → high; SSL below → low)
+          const wickReached = !!(liveOHLC && lastPrice > 0 && level.sweep_status !== 'Swept' && (
+            (level.price > lastPrice && liveOHLC.high >= level.price) ||
+            (level.price < lastPrice && liveOHLC.low <= level.price)
+          ));
 
           // Check if this level has an active displacement state
           const watchState = watchingLevels?.find(w => w.levelId === level.id);
@@ -2888,6 +2919,7 @@ export default function LiquidityLadder() {
               sweepReaction={sweepReaction}
               confluence={confluence}
               eta={etaByLevel[level.id] || null}
+              wickReached={wickReached}
             />
           );
         })}
