@@ -58,14 +58,34 @@ export function importBackup(obj) {
     const data = obj && obj.data && typeof obj.data === 'object' ? obj.data : null;
     if (!data) return { restored: 0, error: 'Not a valid LiquidityHunter backup file.' };
     let restored = 0;
+    let skipped = 0;
+    let writeFailed = false;
     for (const [key, value] of Object.entries(data)) {
       if (EXCLUDE_KEYS.has(key)) continue;
       if (!BACKUP_PREFIXES.some(p => key.startsWith(p))) continue;
-      if (typeof value !== 'string') continue;
-      localStorage.setItem(key, value);
-      restored++;
+      if (typeof value !== 'string') { skipped++; continue; }
+      // Validate the value before writing: collection/JSON blobs (start with
+      // { or [) must parse, so we never restore syntactically-corrupt data.
+      // Plain scalar settings (e.g. "on", "30") are allowed through as-is.
+      const trimmed = value.trim();
+      const looksLikeJson = trimmed.startsWith('{') || trimmed.startsWith('[');
+      if (looksLikeJson) {
+        try { JSON.parse(trimmed); }
+        catch { skipped++; continue; } // corrupt blob — don't restore it
+      }
+      try {
+        localStorage.setItem(key, value);
+        restored++;
+      } catch {
+        // Quota or storage error mid-restore — stop and report partial state.
+        writeFailed = true;
+        break;
+      }
     }
-    return { restored, error: null };
+    if (writeFailed) {
+      return { restored, skipped, error: `Storage full — only ${restored} item(s) restored. Free up space and retry.` };
+    }
+    return { restored, skipped, error: null };
   } catch (e) {
     return { restored: 0, error: 'Could not read the file.' };
   }

@@ -73,6 +73,28 @@ export default function ResearchCockpit() {
     };
   }, []);
 
+  // Surface data-layer problems (corrupt/quarantined storage, quota-exceeded
+  // writes) instead of letting them fail silently. A dismissible banner tells
+  // the user their data couldn't be read/saved so they can act (e.g. free space
+  // or restore a backup) rather than silently losing a session.
+  const [dbError, setDbError] = useState(null);
+  useEffect(() => {
+    const onDbError = (e) => {
+      const { kind, key } = e.detail || {};
+      const friendly = {
+        'corrupt-json': 'Some saved data is corrupt and couldn’t be read (a backup copy was kept).',
+        'bad-shape': 'Some saved data was in an unexpected format and couldn’t be read (a backup copy was kept).',
+        'quota-exceeded': 'Storage is full — recent changes may not have been saved. Free up space or export a backup.',
+        'write-failed': 'Couldn’t save recent changes to local storage.',
+        'write-blocked-corrupt': 'Saving is paused for a data set that failed to load, to avoid overwriting recoverable data.',
+        'read-failed': 'Couldn’t read local storage.',
+      }[kind] || 'A data storage problem occurred.';
+      setDbError({ message: friendly, key });
+    };
+    window.addEventListener('lh:db-error', onDbError);
+    return () => window.removeEventListener('lh:db-error', onDbError);
+  }, []);
+
   // Panel density — scales the left/right rails so you can dial the whole
   // app's text/spacing up or down from one control. Persisted.
   const DENSITY_SCALE = { compact: 0.85, normal: 1, comfortable: 1.15 };
@@ -124,6 +146,16 @@ export default function ResearchCockpit() {
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
       {/* Top Bar */}
       <TopBar />
+
+      {/* Data-integrity banner — never fail silently on storage problems */}
+      {dbError && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-amber-500/15 border-b border-amber-500/40 text-[11px] text-amber-200">
+          <span>⚠️</span>
+          <span className="flex-1">{dbError.message}</span>
+          <button onClick={() => setDbError(null)} aria-label="Dismiss"
+            className="text-amber-300/70 hover:text-white text-[12px] leading-none">✕</button>
+        </div>
+      )}
 
       {/* Live Alerts — compact fixed-height bar, never grows beyond 1 line */}
       <div className="shrink-0 border-b border-terminal-border bg-terminal-bg overflow-hidden">
