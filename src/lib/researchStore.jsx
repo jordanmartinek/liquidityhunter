@@ -60,11 +60,14 @@ export function ResearchProvider({ children }) {
         const data = JSON.parse(raw);
         const age = Date.now() - data.timestamp;
         if (age < LIVE_PRICE_STALE && data.price > 0) {
-          // Check if price actually changed
+          // Only do work when the price actually changed — avoids a redundant
+          // localStorage write (disk churn) and state churn every single second.
           if (data.price !== prevLivePriceRef.current) {
             prevLivePriceRef.current = data.price;
             lastPriceChangeRef.current = Date.now();
             setPriceStale(false);
+            setLastPrice(data.price);
+            try { localStorage.setItem('lh_last_price', data.price.toString()); } catch {}
           } else {
             // Price hasn't changed — check if stale (5+ minutes)
             const timeSinceChange = Date.now() - lastPriceChangeRef.current;
@@ -72,8 +75,6 @@ export function ResearchProvider({ children }) {
               setPriceStale(true);
             }
           }
-          setLastPrice(data.price);
-          localStorage.setItem('lh_last_price', data.price.toString());
           setIsLive(true);
         } else {
           setIsLive(false);
