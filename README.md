@@ -23,6 +23,16 @@ npm install
 npm run dev
 ```
 
+## Tests
+
+Unit tests for the correctness-critical pure logic (ET/DST time, tick rounding,
+cent-exact P&L math, sweep probability, equal-highs/lows, velocity) run with
+Bun's built-in test runner — no extra dependencies:
+
+```bash
+npm test          # or: bun test src/lib/__tests__
+```
+
 ## Features
 
 ### 🪜 Liquidity Ladder

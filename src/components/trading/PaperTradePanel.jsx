@@ -3,6 +3,7 @@ import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { INSTRUMENTS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { etHour } from '@/lib/time';
+import { roundToTick as roundTickPure, legToDollars as legToDollarsPure, addCents } from '@/lib/tradeMath';
 
 const STORAGE_KEY = 'lh_paper_trades';
 const SIZE_KEY = 'lh_paper_size';
@@ -160,16 +161,9 @@ export default function PaperTradePanel() {
   const pointValue = activeInstrument?.point_value || 1; // 1 only as a display placeholder while blocked
   const tickSize = activeInstrument?.tick || 0.25;
 
-  // Round a price to the instrument's valid tick, so entries/stops/targets/exits
-  // can't reflect sub-tick prices that don't exist in the real market.
-  const roundToTick = (price) => {
-    const p = Number(price);
-    if (!Number.isFinite(p) || tickSize <= 0) return p;
-    return Math.round(p / tickSize) * tickSize;
-  };
-  // Per-leg dollar amount, rounded to the cent. Rounding each leg (rather than
-  // only at display) keeps cumulative equity sums from drifting via float error.
-  const legToDollars = (points, pv, qty) => Math.round(points * pv * qty * 100) / 100;
+  // Tick rounding & cent-exact P&L — pure helpers extracted to lib/tradeMath.
+  const roundToTick = (price) => roundTickPure(price, tickSize);
+  const legToDollars = (points, pv, qty) => legToDollarsPure(points, pv, qty);
   const [form, setForm] = useState({
     direction: 'long',
     entry: '',
@@ -455,7 +449,7 @@ export default function PaperTradePanel() {
     let best = null, worst = null, winSum = 0, lossSum = 0, winN = 0, lossN = 0;
     resolved.forEach(t => {
       const d = realizedDollars(t);
-      cum = Math.round((cum + d) * 100) / 100; // keep the running total exact to the cent
+      cum = addCents(cum, d); // keep the running total exact to the cent
       const acct = startBalance + cum;
       curve.push(acct);
       if (acct > peak) peak = acct;
@@ -482,8 +476,8 @@ export default function PaperTradePanel() {
     const today = new Date().toDateString();
     const sum = trades
       .filter(t => t.result !== 'pending' && new Date(t.resolved || t.created).toDateString() === today)
-      .reduce((s, t) => s + realizedDollars(t), 0);
-    return Math.round(sum * 100) / 100; // exact to the cent for the daily-loss gate
+      .reduce((s, t) => addCents(s, realizedDollars(t)), 0);
+    return sum; // exact to the cent for the daily-loss gate
   }, [trades]);
   // Locked out when a positive limit is set and today's loss meets/exceeds it.
   const hitDaily = dailyLimit > 0 && todayRealized <= -dailyLimit;
