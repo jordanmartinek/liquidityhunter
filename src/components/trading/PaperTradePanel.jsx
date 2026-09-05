@@ -157,6 +157,18 @@ export default function PaperTradePanel() {
   const activeInstrument = INSTRUMENTS.find(i => i.symbol === symbol) || null;
   const knownInstrument = !!activeInstrument;
   const pointValue = activeInstrument?.point_value || 1; // 1 only as a display placeholder while blocked
+  const tickSize = activeInstrument?.tick || 0.25;
+
+  // Round a price to the instrument's valid tick, so entries/stops/targets/exits
+  // can't reflect sub-tick prices that don't exist in the real market.
+  const roundToTick = (price) => {
+    const p = Number(price);
+    if (!Number.isFinite(p) || tickSize <= 0) return p;
+    return Math.round(p / tickSize) * tickSize;
+  };
+  // Per-leg dollar amount, rounded to the cent. Rounding each leg (rather than
+  // only at display) keeps cumulative equity sums from drifting via float error.
+  const legToDollars = (points, pv, qty) => Math.round(points * pv * qty * 100) / 100;
   const [form, setForm] = useState({
     direction: 'long',
     entry: '',
@@ -324,7 +336,7 @@ export default function PaperTradePanel() {
     // Use the trade's own size/point-value snapshot when available.
     const pv = trade.pointValue || pointValue;
     const qty = trade.contracts || contracts || 1;
-    const dollars = points * pv * qty;
+    const dollars = legToDollars(points, pv, qty);
     return { points, r, dollars };
   };
 
@@ -411,7 +423,7 @@ export default function PaperTradePanel() {
   const legDollars = (t, exitPrice, qty) => {
     const dir = t.direction === 'long' ? 1 : -1;
     const pv = t.pointValue || pointValue; // stored pv preferred; else current instrument
-    return (exitPrice - t.entry) * dir * pv * qty;
+    return legToDollars((exitPrice - t.entry) * dir, pv, qty); // rounded to the cent
   };
 
   // Total realized dollars for a resolved trade, including any partial
@@ -442,7 +454,7 @@ export default function PaperTradePanel() {
     let best = null, worst = null, winSum = 0, lossSum = 0, winN = 0, lossN = 0;
     resolved.forEach(t => {
       const d = realizedDollars(t);
-      cum += d;
+      cum = Math.round((cum + d) * 100) / 100; // keep the running total exact to the cent
       const acct = startBalance + cum;
       curve.push(acct);
       if (acct > peak) peak = acct;
@@ -467,9 +479,10 @@ export default function PaperTradePanel() {
   // Today's realized P&L (for the daily loss limit).
   const todayRealized = useMemo(() => {
     const today = new Date().toDateString();
-    return trades
+    const sum = trades
       .filter(t => t.result !== 'pending' && new Date(t.resolved || t.created).toDateString() === today)
-      .reduce((sum, t) => sum + realizedDollars(t), 0);
+      .reduce((s, t) => s + realizedDollars(t), 0);
+    return Math.round(sum * 100) / 100; // exact to the cent for the daily-loss gate
   }, [trades]);
   // Locked out when a positive limit is set and today's loss meets/exceeds it.
   const hitDaily = dailyLimit > 0 && todayRealized <= -dailyLimit;
@@ -491,13 +504,15 @@ export default function PaperTradePanel() {
     if (disciplineBlock) return; // discipline gate not satisfied
     if (!knownInstrument) return; // unknown symbol → point value unknown, block
     // Entry defaults to the current (market) price if left blank.
-    const entry = parseFloat(form.entry) || lastPrice || 0;
-    const stop = parseFloat(form.stop) || 0;
-    const t1 = parseFloat(form.target) || 0;
+    // Round all prices to the instrument's valid tick.
+    const entry = roundToTick(parseFloat(form.entry) || lastPrice || 0);
+    const stop = roundToTick(parseFloat(form.stop) || 0);
+    const t1 = roundToTick(parseFloat(form.target) || 0);
     if (!entry || !stop || !t1) return;
+    if (entry === stop) return; // zero-risk trade is invalid (would break R math)
 
     // Build the ordered target ladder (T1 required, T2/T3 optional).
-    const rawTargets = [t1, parseFloat(form.target2), parseFloat(form.target3)]
+    const rawTargets = [t1, roundToTick(parseFloat(form.target2)), roundToTick(parseFloat(form.target3))]
       .filter(v => v && v > 0);
     // Assign scale-out % from the default plan, normalized to the count set.
     const plan = SCALE_PLAN.slice(0, rawTargets.length);
