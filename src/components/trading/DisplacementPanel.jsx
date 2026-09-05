@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { DISPLACEMENT_STATES } from '@/lib/displacementDetector';
 import { cn } from '@/lib/utils';
 
@@ -190,8 +190,8 @@ export default function DisplacementPanel() {
   const {
     displacements, watchingLevels, displacementAlerts,
     dismissDisplacement, dismissAlert, resetDisplacementDetector,
-    lastPrice, isLive
   } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
 
   const [expanded, setExpanded] = useState(true);
   const [showHistory, setShowHistory] = useState(false);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 /**
@@ -32,7 +32,8 @@ function playChimeSound() {
 }
 
 export default function LiveIntelligence() {
-  const { levels, lastPrice, isLive } = useResearch();
+  const { levels } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const priceHistoryRef = useRef([]);
   const sweepSequenceRef = useRef([]);
   const narrativeRef = useRef([]);

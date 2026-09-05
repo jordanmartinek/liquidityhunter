@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 /**
@@ -28,7 +28,8 @@ function playAlertSound() {
 }
 
 export default function LiveAlerts() {
-  const { levels, lastPrice, isLive } = useResearch();
+  const { levels } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const [alerts, setAlerts] = useState([]);
   const lastAlertRef = useRef({});
   const sfpCandidatesRef = useRef({});

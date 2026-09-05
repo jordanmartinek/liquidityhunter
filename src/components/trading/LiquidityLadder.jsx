@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { getStrengthConfig } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import {
@@ -377,10 +377,11 @@ function MiniMap({ allLevels, lastPrice, zoom, panOffset, positions }) {
 // ─── Main LiquidityLadder ───────────────────────────────────
 export default function LiquidityLadder() {
   const {
-    getFilteredLevels, activeTimeframe, lastPrice, drawDirection, isLive,
+    getFilteredLevels, activeTimeframe, drawDirection,
     displacements, watchingLevels, updateLevel, sessionLevelsState,
-    addLevel, removeLevel, priceStale, updateLastPrice, liveOHLC, symbol,
+    addLevel, removeLevel, symbol,
   } = useResearch();
+  const { lastPrice, isLive, priceStale, updateLastPrice, liveOHLC } = useLivePrice();
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const priceTrailRef = useRef([]);
   const [priceTrail, setPriceTrail] = useState([]);

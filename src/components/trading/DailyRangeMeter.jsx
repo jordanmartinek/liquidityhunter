@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 /**
@@ -18,7 +18,7 @@ const RANGE_KEY = 'lh_daily_range';
 const VALUE_AREA_PCT = 0.70;
 
 export default function DailyRangeMeter({ priceToPercent }) {
-  const { lastPrice, isLive } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const [rangeState, setRangeState] = useState(() => loadRange());
 
   function loadRange() {

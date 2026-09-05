@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { ladderAudio } from '@/lib/ladderAudio';
 import {
   getActiveKillZone,
@@ -19,7 +19,8 @@ import { cn } from '@/lib/utils';
  */
 
 export default function LadderExtrasOverlay() {
-  const { levels, lastPrice, isLive, drawDirection } = useResearch();
+  const { levels, drawDirection } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const tickBufferRef = useRef([]);
 
   // State

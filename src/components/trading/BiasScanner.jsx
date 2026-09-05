@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 /**
@@ -107,7 +107,8 @@ function CandleVisual({ patternId }) {
 }
 
 export default function BiasScanner() {
-  const { levels, lastPrice } = useResearch();
+  const { levels } = useResearch();
+  const { lastPrice } = useLivePrice();
   const [selectedPattern, setSelectedPattern] = useState(null);
   const [showPatterns, setShowPatterns] = useState(false);
 
