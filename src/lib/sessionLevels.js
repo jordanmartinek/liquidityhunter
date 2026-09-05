@@ -4,23 +4,29 @@
  * Lifecycle:
  * 1. During Asia session (00:00–08:00 UTC): accumulate high/low from live ticks
  * 2. During London session (08:00–12:30 UTC): accumulate high/low from live ticks
- * 3. 1 hour before NY open (12:30 UTC / 7:30 AM ET): ADD session levels to ladder
- * 4. After NY close (21:00 UTC / 4:00 PM ET): REMOVE session levels from ladder
+ * 3. 1 hour before NY open (8:30 AM ET): ADD session levels to ladder
+ * 4. After NY close (4:00 PM ET): REMOVE session levels from ladder
  * 5. Next day: repeat
  * 
  * Session levels are stored in localStorage with a special prefix so they can be
  * identified and removed independently of user-created levels.
- * 
- * Note: User is in America/Lima (UTC-5, same as ET during standard time).
+ *
+ * The NY schedule uses Eastern wall-clock time (via etHour) so it's correct
+ * year-round; Asia/London stay UTC-anchored.
  */
+import { etHour } from './time';
 
-// ─── Session Time Definitions (UTC hours) ───────────────────
+// ─── Session Time Definitions ───────────────────────────────
+// Asia & London are genuine UTC-anchored FX sessions (they do NOT shift with
+// US DST), so they stay in UTC hours. The NY schedule is Eastern-anchored
+// ("1hr before the 9:30 ET open", "4:00 PM ET close") and is defined in ET
+// hours, evaluated via etHour() so it's DST-correct year-round.
 const SESSIONS = {
   ASIA: { start: 0, end: 8, label: 'Asia' },           // 00:00–08:00 UTC
-  LONDON: { start: 8, end: 12.5, label: 'London' },    // 08:00–12:30 UTC (ends at NY pre-market)
-  NY_PRE: 12.5,                                          // 12:30 UTC = 1hr before NY open
-  NY_OPEN: 13.5,                                         // 13:30 UTC = 9:30 AM ET
-  NY_CLOSE: 21,                                          // 21:00 UTC = 4:00 PM ET
+  LONDON: { start: 8, end: 12.5, label: 'London' },    // 08:00–12:30 UTC
+  NY_PRE_ET: 8.5,                                       // 8:30 AM ET = 1hr before NY open
+  NY_OPEN_ET: 9.5,                                      // 9:30 AM ET
+  NY_CLOSE_ET: 16,                                      // 4:00 PM ET
 };
 
 const STORAGE_KEY = 'lh_session_levels';
@@ -152,9 +158,12 @@ export class SessionLevelEngine {
       this._saveState();
     }
 
-    // ADD: 1 hour before NY open (12:30 UTC) through NY close
+    // NY schedule uses Eastern wall-clock time (DST-correct).
+    const etH = etHour(now);
+
+    // ADD: from 1 hour before NY open (8:30 AM ET) through NY close
     // Conditions: haven't added yet today, and we have data
-    if (hour >= SESSIONS.NY_PRE && hour < SESSIONS.NY_CLOSE && !this.state.levelsAdded) {
+    if (etH >= SESSIONS.NY_PRE_ET && etH < SESSIONS.NY_CLOSE_ET && !this.state.levelsAdded) {
       const hasData = (this.state.asia.high !== null && this.state.asia.low !== null) ||
                       (this.state.london.high !== null && this.state.london.low !== null);
       if (hasData) {
@@ -162,8 +171,8 @@ export class SessionLevelEngine {
       }
     }
 
-    // REMOVE: After NY close (21:00 UTC)
-    if (hour >= SESSIONS.NY_CLOSE && this.state.levelsAdded && !this.state.levelsRemoved) {
+    // REMOVE: After NY close (4:00 PM ET)
+    if (etH >= SESSIONS.NY_CLOSE_ET && this.state.levelsAdded && !this.state.levelsRemoved) {
       return 'remove';
     }
 
@@ -258,12 +267,13 @@ export class SessionLevelEngine {
 
   // ─── Get current state (for UI) ───────────────────────
   getState() {
-    const hour = getUTCHour();
+    const hour = getUTCHour();     // Asia/London are UTC-anchored
+    const etH = etHour();          // NY schedule is ET-anchored (DST-correct)
     let currentSession = 'none';
     if (hour >= SESSIONS.ASIA.start && hour < SESSIONS.ASIA.end) currentSession = 'asia';
     else if (hour >= SESSIONS.LONDON.start && hour < SESSIONS.LONDON.end) currentSession = 'london';
-    else if (hour >= SESSIONS.NY_OPEN && hour < SESSIONS.NY_CLOSE) currentSession = 'ny';
-    else if (hour >= SESSIONS.NY_PRE && hour < SESSIONS.NY_OPEN) currentSession = 'ny_pre';
+    else if (etH >= SESSIONS.NY_OPEN_ET && etH < SESSIONS.NY_CLOSE_ET) currentSession = 'ny';
+    else if (etH >= SESSIONS.NY_PRE_ET && etH < SESSIONS.NY_OPEN_ET) currentSession = 'ny_pre';
 
     return {
       ...this.state,

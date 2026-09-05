@@ -9,6 +9,7 @@
  * - Volatility Compression Detection
  * - Session Replay recording/playback
  */
+import { etHour } from './time';
 
 // ─── #3: Liquidity Gradient Heatmap ─────────────────────────
 // Computes a vertical "heat" array representing where liquidity is concentrated
@@ -78,24 +79,25 @@ export function heatmapToGradient(heatmap) {
 
 
 // ─── #4: Kill Zone Highlighter ──────────────────────────────
-// NY Session kill zones (UTC hours)
+// NY session kill zones defined in EASTERN wall-clock hours (ET), so they land
+// on the same real times year-round regardless of DST. (Previously these were
+// fixed UTC offsets, correct only during EDT.)
 const KILL_ZONES = [
-  { id: 'ny_open', label: '🎯 NY Open Drive', startUTC: 13.5, endUTC: 14.0, intensity: 'high', color: 'emerald' },
-  { id: 'london_close', label: '🇬🇧 London Close', startUTC: 15.5, endUTC: 16.5, intensity: 'high', color: 'blue' },
-  { id: 'power_hour', label: '⚡ Power Hour', startUTC: 19.5, endUTC: 21.0, intensity: 'high', color: 'amber' },
-  { id: 'morning', label: '📈 Mid-Morning', startUTC: 14.5, endUTC: 15.5, intensity: 'medium', color: 'cyan' },
-  { id: 'afternoon', label: '📊 Afternoon', startUTC: 17.0, endUTC: 19.0, intensity: 'medium', color: 'slate' },
-  { id: 'lunch', label: '🍽️ Lunch Chop', startUTC: 16.5, endUTC: 17.0, intensity: 'low', color: 'red' },
+  { id: 'ny_open', label: '🎯 NY Open Drive', startET: 9.5, endET: 10.0, intensity: 'high', color: 'emerald' },
+  { id: 'london_close', label: '🇬🇧 London Close', startET: 11.5, endET: 12.5, intensity: 'high', color: 'blue' },
+  { id: 'power_hour', label: '⚡ Power Hour', startET: 15.5, endET: 16.0, intensity: 'high', color: 'amber' },
+  { id: 'morning', label: '📈 Mid-Morning', startET: 10.5, endET: 11.5, intensity: 'medium', color: 'cyan' },
+  { id: 'afternoon', label: '📊 Afternoon', startET: 13.0, endET: 15.0, intensity: 'medium', color: 'slate' },
+  { id: 'lunch', label: '🍽️ Lunch Chop', startET: 12.5, endET: 13.0, intensity: 'low', color: 'red' },
 ];
 
 export function getActiveKillZone(time = Date.now()) {
-  const now = new Date(time);
-  const hour = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const hour = etHour(time); // Eastern wall-clock decimal hour (DST-correct)
 
   for (const zone of KILL_ZONES) {
-    if (hour >= zone.startUTC && hour < zone.endUTC) {
-      const elapsed = hour - zone.startUTC;
-      const total = zone.endUTC - zone.startUTC;
+    if (hour >= zone.startET && hour < zone.endET) {
+      const elapsed = hour - zone.startET;
+      const total = zone.endET - zone.startET;
       const progress = Math.round((elapsed / total) * 100);
       return { ...zone, active: true, progress };
     }
@@ -103,7 +105,7 @@ export function getActiveKillZone(time = Date.now()) {
 
   // Check if approaching next kill zone (within 5 min)
   for (const zone of KILL_ZONES) {
-    if (hour >= zone.startUTC - 0.083 && hour < zone.startUTC) { // 5 min before
+    if (hour >= zone.startET - 0.083 && hour < zone.startET) { // 5 min before
       return { ...zone, active: false, approaching: true, progress: 0 };
     }
   }
