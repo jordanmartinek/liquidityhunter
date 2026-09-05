@@ -1,6 +1,6 @@
 import React from 'react';
 import { Crosshair, Mic, MicOff } from 'lucide-react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
 import { INSTRUMENTS } from '@/lib/constants';
 import { exportBackup, importBackupFromFile } from '@/lib/backup';
@@ -55,7 +55,8 @@ function parseSpokenPrice(text) {
 }
 
 export default function TopBar() {
-  const { symbol, setSymbol, lastPrice, updateLastPrice, currentDate, isLive, priceStale } = useResearch();
+  const { symbol, setSymbol, currentDate } = useResearch();
+  const { lastPrice, updateLastPrice, isLive, priceStale } = useLivePrice();
   const [priceInput, setPriceInput] = React.useState('');
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
   const backupFileRef = React.useRef(null);

@@ -1,9 +1,15 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import db, { ENTITIES } from './db';
 import { INSTRUMENTS, TIMEFRAMES } from './constants';
 import { displacementDetector, DISPLACEMENT_STATES } from './displacementDetector';
 import { sessionLevelEngine, SessionLevelEngine } from './sessionLevels';
 
+// Two contexts to avoid an app-wide re-render storm:
+//  • LivePriceContext — the "hot" fields that change every ~1s (price feed).
+//  • ResearchContext  — the "cold" app state (levels, notes, config, etc.).
+// Components that don't read live price only subscribe to the cold context and
+// therefore no longer re-render on every tick.
+const LivePriceContext = createContext(null);
 const ResearchContext = createContext(null);
 
 // Helper: get today's date string (local)
@@ -347,17 +353,20 @@ export function ResearchProvider({ children }) {
   const bslCount = levels.filter((l) => l.side === 'Buy-Side').length;
   const sslCount = levels.filter((l) => l.side === 'Sell-Side').length;
 
-  const value = {
-    // Symbol
-    symbol,
-    setSymbol,
-
-    // Price
+  // ─── Hot context value (changes ~1x/sec) ─────────────────────
+  const liveValue = useMemo(() => ({
     lastPrice,
     updateLastPrice,
     isLive,
     priceStale,
     liveOHLC,
+  }), [lastPrice, updateLastPrice, isLive, priceStale, liveOHLC]);
+
+  // ─── Cold context value (changes rarely) ─────────────────────
+  const coldValue = useMemo(() => ({
+    // Symbol
+    symbol,
+    setSymbol,
 
     // Timeframe
     activeTimeframe,
@@ -407,18 +416,39 @@ export function ResearchProvider({ children }) {
 
     // Helpers
     getToday,
-  };
+  }), [
+    symbol, activeTimeframe,
+    levels, addLevel, updateLevel, removeLevel, getFilteredLevels,
+    sessionNotes, saveSessionNote, getSessionNote, currentDate,
+    drawDirection, updateDrawDirection, drawThesis, updateDrawThesis,
+    totalLevels, untouchedCount, testedCount, sweptCount, bslCount, sslCount,
+    displacements, watchingLevels, displacementAlerts, dismissDisplacement, dismissAlert, resetDisplacementDetector,
+    sessionLevelsState, sessionLevelsEnabled, toggleSessionLevels, resetSessionLevels,
+  ]);
 
   return (
-    <ResearchContext.Provider value={value}>
-      {children}
+    <ResearchContext.Provider value={coldValue}>
+      <LivePriceContext.Provider value={liveValue}>
+        {children}
+      </LivePriceContext.Provider>
     </ResearchContext.Provider>
   );
 }
 
+// Cold app state (levels, notes, config, displacement, session levels). Does
+// NOT re-render on the per-second price tick.
 export function useResearch() {
   const ctx = useContext(ResearchContext);
   if (!ctx) throw new Error('useResearch must be used within ResearchProvider');
+  return ctx;
+}
+
+// Hot live-price fields (lastPrice, isLive, priceStale, liveOHLC,
+// updateLastPrice). Only subscribe to this where you actually need the feed —
+// components that use it re-render on each tick; others stay still.
+export function useLivePrice() {
+  const ctx = useContext(LivePriceContext);
+  if (!ctx) throw new Error('useLivePrice must be used within ResearchProvider');
   return ctx;
 }
 

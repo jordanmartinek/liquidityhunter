@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { computeLadderIntelligence, getPhaseLabel } from '@/lib/priceNarrative';
 import { cn } from '@/lib/utils';
 
@@ -18,7 +18,8 @@ import { cn } from '@/lib/utils';
  */
 
 export default function LadderIntelligenceOverlay() {
-  const { levels, lastPrice, isLive, drawDirection } = useResearch();
+  const { levels, drawDirection } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const tickBufferRef = useRef([]);
   const [intelligence, setIntelligence] = useState(null);
 

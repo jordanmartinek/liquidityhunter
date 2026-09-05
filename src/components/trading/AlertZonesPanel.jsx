@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { alertZoneManager } from '@/lib/bangerFeatures';
 import { ladderAudio } from '@/lib/ladderAudio';
 import { cn } from '@/lib/utils';
@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
  * AlertZonesPanel — create/manage custom price alert zones
  */
 export default function AlertZonesPanel() {
-  const { lastPrice, isLive } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const [zones, setZones] = useState(() => alertZoneManager.getZones());
   const [showForm, setShowForm] = useState(false);
   const [highPrice, setHighPrice] = useState('');

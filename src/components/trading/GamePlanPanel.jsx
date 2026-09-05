@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { generateGamePlan } from '@/lib/bangerFeatures';
 import { cn } from '@/lib/utils';
 
@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
  * GamePlanPanel — auto-generates a pre-session 3-bullet game plan
  */
 export default function GamePlanPanel() {
-  const { levels, drawDirection, lastPrice, sessionLevelsState } = useResearch();
+  const { levels, drawDirection, sessionLevelsState } = useResearch();
+  const { lastPrice } = useLivePrice();
 
   const plan = useMemo(() => {
     const activeLevels = levels.filter(l => l.sweep_status !== 'Swept');

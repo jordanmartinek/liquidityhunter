@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { ghostTrader } from '@/lib/bangerFeatures';
 import { cn } from '@/lib/utils';
 
@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
  * GhostTraderPanel — mark hypothetical entries, track live P&L without trading
  */
 export default function GhostTraderPanel() {
-  const { lastPrice, isLive, levels } = useResearch();
+  const { levels } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const [trades, setTrades] = useState(() => ghostTrader.getAllTrades());
   const [showForm, setShowForm] = useState(false);
   const [direction, setDirection] = useState('long');

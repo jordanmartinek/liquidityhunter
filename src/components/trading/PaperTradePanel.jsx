@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { INSTRUMENTS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import { etHour } from '@/lib/time';
@@ -30,7 +30,8 @@ const RESULTS = [
  * Available 24/7 for building muscle memory.
  */
 export default function PaperTradePanel() {
-  const { levels, lastPrice, symbol } = useResearch();
+  const { levels, symbol } = useResearch();
+  const { lastPrice } = useLivePrice();
   const [trades, setTrades] = useState(loadPaperTrades);
   const [showForm, setShowForm] = useState(false);
   const [showStats, setShowStats] = useState(false);
