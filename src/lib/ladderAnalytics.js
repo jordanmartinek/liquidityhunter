@@ -411,3 +411,24 @@ export function findHTFCorroboration(levels, tolerance = 10) {
   }
   return corroborated;
 }
+
+// Set of active-level ids that sit within `tolerance` points of at least one
+// OTHER active level (i.e. price confluence). Sorted single-pass window, so it
+// is O(n log n) instead of the naive O(n^2) all-pairs comparison.
+export function detectConfluentLevels(levels, tolerance = 15) {
+  const active = (levels || []).filter(l => l && l.sweep_status !== 'Swept' && l.price > 0);
+  const ids = new Set();
+  if (active.length < 2) return ids;
+  const sorted = active.slice().sort((a, b) => a.price - b.price);
+  let lo = 0;
+  for (let hi = 0; hi < sorted.length; hi++) {
+    // Advance the window's lower bound while it's out of tolerance below `hi`.
+    while (sorted[hi].price - sorted[lo].price > tolerance) lo++;
+    // Any other level in [lo, hi) is within tolerance of `hi` → both confluent.
+    if (hi > lo) {
+      ids.add(sorted[hi].id);
+      for (let k = lo; k < hi; k++) ids.add(sorted[k].id);
+    }
+  }
+  return ids;
+}

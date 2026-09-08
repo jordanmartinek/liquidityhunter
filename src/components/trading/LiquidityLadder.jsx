@@ -18,6 +18,7 @@ import {
   detectEqualHighsLows,
   computeConfluence,
   findHTFCorroboration,
+  detectConfluentLevels,
 } from '@/lib/ladderAnalytics';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
@@ -1493,20 +1494,9 @@ export default function LiquidityLadder() {
     return () => window.removeEventListener('keydown', onKey);
   }, [lastPrice, recenterOnPrice, resetView, toggleMeasure, toggleWhatIf, cycleCandleMode]);
 
-  // Detect confluence (levels within 15 pts of each other)
-  const confluenceLevels = useMemo(() => {
-    const active = filteredLevels.filter(l => l.sweep_status !== 'Swept');
-    const confluenceIds = new Set();
-    for (let i = 0; i < active.length; i++) {
-      for (let j = i + 1; j < active.length; j++) {
-        if (Math.abs(active[i].price - active[j].price) <= 15) {
-          confluenceIds.add(active[i].id);
-          confluenceIds.add(active[j].id);
-        }
-      }
-    }
-    return confluenceIds;
-  }, [filteredLevels]);
+  // Detect confluence (levels within 15 pts of each other). O(n log n) via the
+  // extracted, tested detectConfluentLevels helper (was an inline O(n^2) loop).
+  const confluenceLevels = useMemo(() => detectConfluentLevels(filteredLevels, 15), [filteredLevels]);
 
   // #4: Magnet Zones
   const magnetZones = useMemo(() => calculateMagnetZones(filteredLevels), [filteredLevels]);
