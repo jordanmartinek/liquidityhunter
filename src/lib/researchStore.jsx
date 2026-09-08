@@ -188,6 +188,45 @@ export function ResearchProvider({ children }) {
     return levels.filter((l) => l.timeframe === timeframe);
   }, [levels]);
 
+  // ─── Session-close snapshot (for "levels crossed while closed") ─
+  // Written on beforeunload / visibilitychange→hidden so the next session
+  // can compare its starting price against this snapshot and flag any levels
+  // whose price lay between the close price and the new open price.
+  const SESSION_CLOSE_KEY = 'lh_session_close';
+  useEffect(() => {
+    const write = () => {
+      try {
+        // Re-read levels directly from localStorage rather than relying on
+        // the closure over `levels` (which may be stale if the effect was
+        // captured before the latest level mutation).
+        const currentLevels = db.list(ENTITIES.LIQUIDITY_ZONES);
+        const currentPrice = prevLivePriceRef.current || lastPrice;
+        if (currentPrice <= 0) return; // nothing meaningful to snapshot
+        const snapshot = {
+          price: currentPrice,
+          timestamp: Date.now(),
+          levelSnapshots: currentLevels.map((l) => ({
+            id: l.id,
+            price: l.price,
+            sweep_status: l.sweep_status,
+          })),
+        };
+        localStorage.setItem(SESSION_CLOSE_KEY, JSON.stringify(snapshot));
+      } catch { /* quota / unavailable */ }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') write();
+    };
+
+    window.addEventListener('beforeunload', write);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', write);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [lastPrice, levels]);
+
   // ─── Auto-Sweep Detection (when live price crosses a level) ────
   useEffect(() => {
     if (!isLive || lastPrice <= 0 || levels.length === 0) return;
