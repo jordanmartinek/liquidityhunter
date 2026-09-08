@@ -21,7 +21,7 @@ import {
   detectConfluentLevels,
 } from '@/lib/ladderAnalytics';
 import { ema, responseToAlpha, instantVelocity } from '@/lib/smoothing';
-import { readLevelApproach } from '@/lib/momentum';
+import { readLevelApproach, readValueAreaPullback } from '@/lib/momentum';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity, calculateETAs } from '@/lib/ladderExtras';
@@ -2986,6 +2986,15 @@ export default function LiquidityLadder() {
           const isBullish = disp.direction === 'bullish';
           const isEntry = disp.state === 'at_avwap';
 
+          // Value-area pullback read: is price pulling back into this
+          // displacement's value area (toward the AVWAP), and how fast?
+          // Slow pullback → the leg is likely to continue; fast → it may be
+          // failing/reversing. Only meaningful when price is near the AVWAP.
+          const nearValueArea = lastPrice > 0 && Math.abs(lastPrice - disp.avwapValue) <= 8;
+          const pullback = nearValueArea
+            ? readValueAreaPullback(Math.abs(smoothedVel), disp.direction, smoothedVel)
+            : null;
+
           return (
             <div
               key={`avwap-${disp.id}`}
@@ -2996,6 +3005,16 @@ export default function LiquidityLadder() {
                 isEntry ? 'border-emerald-400 animate-pulse' :
                 isBullish ? 'border-purple-400/60' : 'border-purple-400/60'
               )} />
+              {/* Pullback momentum read into the value area */}
+              {pullback && (
+                <span className={cn('text-[7px] font-bold px-1 py-0.5 rounded-sm ml-0.5 whitespace-nowrap',
+                  pullback.bias === 'continuation' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : pullback.bias === 'failing' ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                  : 'bg-slate-700/40 text-slate-300 border border-slate-600')}
+                  title={pullback.note}>
+                  {pullback.icon} {pullback.bias === 'continuation' ? 'cont' : pullback.bias === 'failing' ? 'fail' : '—'}
+                </span>
+              )}
               <span className={cn(
                 'text-[8px] font-mono px-1.5 py-0.5 rounded-sm ml-0.5 whitespace-nowrap',
                 isEntry ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' :
