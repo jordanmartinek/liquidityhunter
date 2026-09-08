@@ -20,6 +20,7 @@ import {
   findHTFCorroboration,
   detectConfluentLevels,
 } from '@/lib/ladderAnalytics';
+import { ema, responseToAlpha, instantVelocity } from '@/lib/smoothing';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity, calculateETAs } from '@/lib/ladderExtras';
@@ -437,7 +438,7 @@ export default function LiquidityLadder() {
   const [smoothResponse, setSmoothResponse] = usePersistentState('lh_ladder_smooth', 30, numberCodec({ int: true, valid: (n) => n >= 1 && n <= 100 }));
   // Map 1–100 → alpha 0.02–0.40 (linear). 30 ≈ 0.135 (~old default).
   const smoothAlphaRef = useRef(0.135);
-  smoothAlphaRef.current = 0.02 + (smoothResponse / 100) * 0.38;
+  smoothAlphaRef.current = responseToAlpha(smoothResponse);
 
   // #12: Drag-to-edit state
   const [dragEditLevel, setDragEditLevel] = useState(null);
@@ -920,9 +921,7 @@ export default function LiquidityLadder() {
     // Smoothed speed via EMA. Alpha is user-adjustable (smoothing slider):
     // steady magnitude for projection ETAs; raw velocity still drives chevrons.
     const alpha = smoothAlphaRef.current;
-    smoothedSpeedRef.current = smoothedSpeedRef.current === 0
-      ? vel.speed
-      : smoothedSpeedRef.current + alpha * (vel.speed - smoothedSpeedRef.current);
+    smoothedSpeedRef.current = ema(smoothedSpeedRef.current, vel.speed, alpha);
 
     // Signed smoothed velocity: EMA of (price delta / time delta) between the
     // last two ticks. Positive = trending up, negative = down. Stable enough to
@@ -930,11 +929,8 @@ export default function LiquidityLadder() {
     const prevTick = lastTickForVelRef.current;
     const nowTs = Date.now();
     if (prevTick) {
-      const dt = Math.max(0.001, (nowTs - prevTick.time) / 1000);
-      const instVel = (lastPrice - prevTick.price) / dt; // signed pts/sec
-      smoothedVelRef.current = smoothedVelRef.current === 0
-        ? instVel
-        : smoothedVelRef.current + alpha * (instVel - smoothedVelRef.current);
+      const instVel = instantVelocity(prevTick.price, lastPrice, nowTs - prevTick.time);
+      smoothedVelRef.current = ema(smoothedVelRef.current, instVel, alpha);
     }
     lastTickForVelRef.current = { price: lastPrice, time: nowTs };
 
