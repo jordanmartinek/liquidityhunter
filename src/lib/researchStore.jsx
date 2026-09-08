@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import db, { ENTITIES } from './db';
 import { INSTRUMENTS, TIMEFRAMES } from './constants';
+import { detectCrossedLevels } from './levelCrossing';
 import { displacementDetector, DISPLACEMENT_STATES } from './displacementDetector';
 import { sessionLevelEngine, SessionLevelEngine } from './sessionLevels';
 
@@ -202,6 +203,44 @@ export function ResearchProvider({ children }) {
       }
     });
   }, [lastPrice, isLive]);
+
+  // ─── Overnight / away crossing catch-up ───────────────────────
+  // The live auto-detector only marks a level when price is within ~2pts on a
+  // tick, so an overnight move that jumps PAST levels is missed. On the first
+  // fresh live price after loading, compare against the price from last session
+  // (the persisted lh_last_price captured at mount) and surface any levels the
+  // move crossed for one-tap review — we don't silently mutate status because a
+  // gap-through isn't necessarily a clean sweep.
+  const sessionStartPriceRef = useRef(
+    (() => { const n = parseFloat(localStorage.getItem('lh_last_price')); return Number.isFinite(n) ? n : 0; })()
+  );
+  const crossingCheckedRef = useRef(false);
+  const [crossedLevels, setCrossedLevels] = useState([]);
+  useEffect(() => {
+    if (crossingCheckedRef.current) return;
+    if (!isLive || lastPrice <= 0 || levels.length === 0) return;
+    const prev = sessionStartPriceRef.current;
+    // Need a meaningful gap from last session (ignore tiny drift / same session).
+    if (prev > 0 && Math.abs(lastPrice - prev) >= 3) {
+      const crossed = detectCrossedLevels(levels, prev, lastPrice);
+      if (crossed.length > 0) setCrossedLevels(crossed);
+    }
+    crossingCheckedRef.current = true; // one-shot per app load
+  }, [isLive, lastPrice, levels]);
+
+  const dismissCrossedLevels = useCallback(() => setCrossedLevels([]), []);
+  const markCrossedLevelsSwept = useCallback(() => {
+    setCrossedLevels((cur) => {
+      cur.forEach((l) => {
+        const fresh = db.get(ENTITIES.LIQUIDITY_ZONES, l.id);
+        if (fresh && fresh.sweep_status !== 'Swept') {
+          const updated = db.update(ENTITIES.LIQUIDITY_ZONES, l.id, { sweep_status: 'Swept' });
+          if (updated) setLevels((prev) => prev.map((x) => (x.id === l.id ? updated : x)));
+        }
+      });
+      return [];
+    });
+  }, []);
 
   // ─── Displacement Detector Integration ────────────────────────
   const [displacements, setDisplacements] = useState([]);
@@ -415,6 +454,11 @@ export function ResearchProvider({ children }) {
     toggleSessionLevels,
     resetSessionLevels,
 
+    // Overnight/away level-crossing review
+    crossedLevels,
+    dismissCrossedLevels,
+    markCrossedLevelsSwept,
+
     // Helpers
     getToday,
   }), [
@@ -425,6 +469,7 @@ export function ResearchProvider({ children }) {
     totalLevels, untouchedCount, testedCount, sweptCount, bslCount, sslCount,
     displacements, watchingLevels, displacementAlerts, dismissDisplacement, dismissAlert, resetDisplacementDetector,
     sessionLevelsState, sessionLevelsEnabled, toggleSessionLevels, resetSessionLevels,
+    crossedLevels, dismissCrossedLevels, markCrossedLevelsSwept,
   ]);
 
   return (

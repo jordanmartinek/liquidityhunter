@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, X, Droplets, Mic, MicOff } from 'lucide-react';
-import { useResearch } from '@/lib/researchStore';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
 import { cn } from '@/lib/utils';
 import { POOL_TYPES, LIQUIDITY_SIDES, TIMEFRAMES, SWEEP_STATUSES, STRENGTH_LEVELS, getStrengthConfig } from '@/lib/constants';
@@ -132,6 +132,7 @@ function SweepBadge({ status, onCycle }) {
 
 export default function LiquidityLevelList() {
   const { levels, addLevel, updateLevel, removeLevel, activeTimeframe, getFilteredLevels } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -277,6 +278,25 @@ export default function LiquidityLevelList() {
   // Show levels for active timeframe
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const sortedLevels = [...filteredLevels].sort((a, b) => b.price - a.price);
+  // Index in the (high→low) sorted list where the current price sits — the
+  // marker row is drawn just before the first level priced below lastPrice.
+  const priceMarkerIndex = (lastPrice > 0)
+    ? (() => { const i = sortedLevels.findIndex(l => l.price < lastPrice); return i === -1 ? sortedLevels.length : i; })()
+    : -1;
+  // Nearest level to price (for a subtle row highlight).
+  const nearestLevelId = (lastPrice > 0 && sortedLevels.length)
+    ? sortedLevels.reduce((best, l) => Math.abs(l.price - lastPrice) < Math.abs(best.price - lastPrice) ? l : best).id
+    : null;
+  // A reusable price-marker row element.
+  const PriceMarker = () => (
+    <div className="flex items-center gap-1.5 my-0.5 select-none" aria-label={`Current price ${lastPrice.toFixed(2)}`}>
+      <div className={cn('flex-1 h-px', isLive ? 'bg-emerald-400/60' : 'bg-slate-500/50')} />
+      <span className={cn('text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border tabular-nums',
+        isLive ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'bg-slate-700/50 border-slate-600 text-slate-300')}>
+        ◄ {lastPrice.toFixed(2)}{isLive ? '' : ' (last)'}
+      </span>
+    </div>
+  );
 
   return (
     <div className="panel flex flex-col h-full">
@@ -448,14 +468,17 @@ export default function LiquidityLevelList() {
           </div>
         )}
 
-        {sortedLevels.map((level) => {
+        {sortedLevels.map((level, idx) => {
           const strength = getStrengthConfig(level.strength);
           const isSwept = level.sweep_status === 'Swept';
           const isEditing = editingId === level.id;
+          const markerBefore = idx === priceMarkerIndex; // draw price line before this row
 
           if (isEditing && editForm) {
             return (
-              <form key={level.id} onSubmit={(e) => { e.preventDefault(); saveEdit(); }}
+              <React.Fragment key={level.id}>
+              {markerBefore && <PriceMarker />}
+              <form onSubmit={(e) => { e.preventDefault(); saveEdit(); }}
                 className="space-y-2 p-2 bg-terminal-bg rounded border border-accent-blue/30 mb-1">
                 <div className="grid grid-cols-2 gap-1">
                   <input placeholder="Label" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="text-xs" />
@@ -486,17 +509,20 @@ export default function LiquidityLevelList() {
                   <button type="button" onClick={cancelEdit} className="btn btn-ghost text-[10px]">Cancel</button>
                 </div>
               </form>
+              </React.Fragment>
             );
           }
 
           return (
+            <React.Fragment key={level.id}>
+            {markerBefore && <PriceMarker />}
             <div
-              key={level.id}
-              className={`flex items-center gap-2 p-1.5 rounded border transition-colors group ${
+              className={cn('flex items-center gap-2 p-1.5 rounded border transition-colors group',
                 isSwept
                   ? 'bg-terminal-bg/50 border-terminal-border/50 opacity-60'
-                  : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light'
-              }`}
+                  : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light',
+                level.id === nearestLevelId && !isSwept && 'ring-1 ring-emerald-400/50'
+              )}
             >
               {/* Side indicator */}
               <div className={`w-1 h-8 rounded-full ${
@@ -558,8 +584,11 @@ export default function LiquidityLevelList() {
                 <X size={12} />
               </button>
             </div>
+            </React.Fragment>
           );
         })}
+        {/* Price is below every level → marker at the very bottom */}
+        {priceMarkerIndex === sortedLevels.length && sortedLevels.length > 0 && <PriceMarker />}
       </div>
     </div>
   );
