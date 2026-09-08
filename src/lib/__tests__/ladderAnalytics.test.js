@@ -3,6 +3,7 @@ import {
   calculateSweepProbability,
   detectEqualHighsLows,
   calculateVelocity,
+  detectConfluentLevels,
 } from '../ladderAnalytics';
 
 const mkLevel = (o = {}) => ({
@@ -100,5 +101,51 @@ describe('calculateVelocity', () => {
   test('too few ticks → zeroed velocity', () => {
     expect(calculateVelocity([{ price: 100, time: Date.now() }]).speed).toBe(0);
     expect(calculateVelocity([]).direction).toBe(0);
+  });
+});
+
+describe('detectConfluentLevels', () => {
+  // Reference O(n^2) implementation (the original inline logic) to cross-check.
+  const naive = (levels, tol) => {
+    const active = levels.filter(l => l.sweep_status !== 'Swept' && l.price > 0);
+    const ids = new Set();
+    for (let i = 0; i < active.length; i++)
+      for (let j = i + 1; j < active.length; j++)
+        if (Math.abs(active[i].price - active[j].price) <= tol) { ids.add(active[i].id); ids.add(active[j].id); }
+    return ids;
+  };
+
+  test('flags both levels within tolerance', () => {
+    const ids = detectConfluentLevels([mkLevel({ id: 'a', price: 100 }), mkLevel({ id: 'b', price: 112 })], 15);
+    expect(ids.has('a')).toBe(true);
+    expect(ids.has('b')).toBe(true);
+  });
+  test('does not flag levels beyond tolerance', () => {
+    const ids = detectConfluentLevels([mkLevel({ id: 'a', price: 100 }), mkLevel({ id: 'b', price: 130 })], 15);
+    expect(ids.size).toBe(0);
+  });
+  test('ignores swept levels', () => {
+    const ids = detectConfluentLevels([
+      mkLevel({ id: 'a', price: 100, sweep_status: 'Swept' }),
+      mkLevel({ id: 'b', price: 105 }),
+    ], 15);
+    expect(ids.size).toBe(0);
+  });
+  test('empty / single level → empty set', () => {
+    expect(detectConfluentLevels([], 15).size).toBe(0);
+    expect(detectConfluentLevels([mkLevel({ id: 'a', price: 100 })], 15).size).toBe(0);
+  });
+  test('matches the naive O(n^2) reference across a mixed set', () => {
+    const levels = [
+      mkLevel({ id: 'a', price: 100 }),
+      mkLevel({ id: 'b', price: 108 }),
+      mkLevel({ id: 'c', price: 121 }),   // within 15 of b (13), not a (21)
+      mkLevel({ id: 'd', price: 200 }),   // isolated
+      mkLevel({ id: 'e', price: 205 }),   // within 15 of d
+      mkLevel({ id: 'f', price: 300, sweep_status: 'Swept' }),
+    ];
+    const got = detectConfluentLevels(levels, 15);
+    const ref = naive(levels, 15);
+    expect([...got].sort()).toEqual([...ref].sort());
   });
 });
