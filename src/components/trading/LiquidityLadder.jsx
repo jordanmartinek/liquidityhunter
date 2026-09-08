@@ -21,6 +21,7 @@ import {
   detectConfluentLevels,
 } from '@/lib/ladderAnalytics';
 import { ema, responseToAlpha, instantVelocity } from '@/lib/smoothing';
+import { readLevelApproach } from '@/lib/momentum';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity, calculateETAs } from '@/lib/ladderExtras';
@@ -94,7 +95,7 @@ function Rung({
   level, percent, distanceFromPrice, isImminent, isConfluence,
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
-  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta, wickReached, brightness = 1,
+  blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta, wickReached, brightness = 1, momentum,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -232,6 +233,16 @@ function Rung({
           {/* Wick-reached badge — the current bar's wick has touched this level */}
           {wickReached && !isSwept && (
             <span className="text-[7px] mr-0.5 font-bold text-fuchsia-300 animate-pulse" title="Wick has touched this level (bar not closed through it yet)">⤳</span>
+          )}
+          {/* Momentum read at first contact: how fast price arrived → likely behavior */}
+          {momentum && !isSwept && (
+            <span className={cn('text-[7px] mr-0.5 font-bold px-0.5 rounded-sm',
+              momentum.bias === 'continuation' ? 'text-emerald-300 bg-emerald-500/15'
+              : momentum.bias === 'reaction' ? 'text-amber-300 bg-amber-500/15'
+              : 'text-slate-300')}
+              title={momentum.note}>
+              {momentum.icon}{momentum.bias === 'continuation' ? ' cont' : momentum.bias === 'reaction' ? ' react' : ''}
+            </span>
           )}
           {/* SFP badge */}
           {hasSFP && !isSwept && (
@@ -452,6 +463,10 @@ export default function LiquidityLadder() {
   const [sweepOutcome, setSweepOutcome] = useState(null);
   const seenReactionsRef = useRef({}); // levelId -> status already announced
   const approachRef = useRef({}); // levelId -> true while price is within the approach band (fire-once)
+  // Momentum read captured at first contact with a level: levelId -> read
+  // ({ tier, bias, icon, label, note }). Speaks to likely continuation vs
+  // reaction based on how fast price arrived.
+  const [momentumReads, setMomentumReads] = useState({});
   const [liquidityVoids, setLiquidityVoids] = useState([]);
   const [openingRange, setOpeningRange] = useState(null);
   const [gravityWeights, setGravityWeights] = useState([]);
@@ -1053,8 +1068,22 @@ export default function LiquidityLadder() {
             sendNotification('🎯 Approaching level', `${lvl.name || lvl.pool_type} @ ${lvl.price.toFixed(2)}`, 'lh_approach');
           }
         } catch {}
+        // Capture the momentum read at FIRST CONTACT: how fast price arrived at
+        // this level, and what that suggests (slow → continuation likely; fast
+        // → sweep-through / sharp reaction more likely).
+        const read = readLevelApproach(
+          Math.abs(smoothedVelRef.current),
+          smoothedVelRef.current,
+          lvl.price,
+          lastPrice,
+        );
+        if (read) setMomentumReads(prev => ({ ...prev, [lvl.id]: read }));
       } else if (!near && approachRef.current[lvl.id]) {
         approachRef.current[lvl.id] = false; // moved away — re-arm
+        setMomentumReads(prev => {
+          if (!prev[lvl.id]) return prev;
+          const next = { ...prev }; delete next[lvl.id]; return next; // clear on leave
+        });
       }
     }
   }, [lastPrice]);
@@ -2921,6 +2950,7 @@ export default function LiquidityLadder() {
               eta={etaByLevel[level.id] || null}
               wickReached={wickReached}
               brightness={brightnessFactor}
+              momentum={momentumReads[level.id] || null}
             />
           );
         })}
