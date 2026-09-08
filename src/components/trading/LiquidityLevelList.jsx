@@ -1,9 +1,49 @@
-import React, { useState } from 'react';
-import { Plus, X, Droplets, Mic, MicOff } from 'lucide-react';
-import { useResearch } from '@/lib/researchStore';
+import React, { useState, useMemo } from 'react';
+import { Plus, X, Droplets, Mic, MicOff, ArrowRight } from 'lucide-react';
+import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
 import { cn } from '@/lib/utils';
 import { POOL_TYPES, LIQUIDITY_SIDES, TIMEFRAMES, SWEEP_STATUSES, STRENGTH_LEVELS, getStrengthConfig } from '@/lib/constants';
+
+// ─── Session-close snapshot helpers ────────────────────────────────────────
+const SESSION_CLOSE_KEY = 'lh_session_close';
+
+/**
+ * Read the snapshot saved when the app was last closed.
+ * Returns null if nothing is stored or the data is malformed.
+ */
+function readSessionCloseSnapshot() {
+  try {
+    const raw = localStorage.getItem(SESSION_CLOSE_KEY);
+    if (!raw) return null;
+    const snap = JSON.parse(raw);
+    if (!snap || typeof snap.price !== 'number' || !Array.isArray(snap.levelSnapshots)) return null;
+    return snap; // { price, timestamp, levelSnapshots: [{ id, price, sweep_status }] }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Given the price at last close and the current price, return a Set of level
+ * IDs whose price was crossed (i.e. lay strictly between the two prices).
+ * We look up each level in the close snapshot by ID to get its price at that
+ * time — levels added since the last close are naturally excluded.
+ */
+function computeCrossedIds(snapshot, currentPrice) {
+  if (!snapshot || currentPrice <= 0) return new Set();
+  const { price: closedAt, levelSnapshots } = snapshot;
+  if (closedAt <= 0) return new Set();
+  const lo = Math.min(closedAt, currentPrice);
+  const hi = Math.max(closedAt, currentPrice);
+  const crossed = new Set();
+  for (const s of levelSnapshots) {
+    if (s.price > lo && s.price < hi) {
+      crossed.add(s.id);
+    }
+  }
+  return crossed;
+}
 
 /**
  * parseVoiceLevel — attempts to extract level data from spoken text.
@@ -130,8 +170,24 @@ function SweepBadge({ status, onCycle }) {
   );
 }
 
+/**
+ * Small badge shown on levels that were passed through while the app was closed.
+ * The direction arrow shows whether price moved up (↑) or down (↓) through it.
+ */
+function CrossedBadge({ direction }) {
+  return (
+    <span
+      className="text-[8px] px-1 py-0.5 rounded border bg-violet-500/15 text-violet-300 border-violet-500/30 font-medium whitespace-nowrap"
+      title={`Price crossed this level while the app was closed (moved ${direction === 'up' ? 'up' : 'down'} through it)`}
+    >
+      {direction === 'up' ? '↑' : '↓'} crossed
+    </span>
+  );
+}
+
 export default function LiquidityLevelList() {
   const { levels, addLevel, updateLevel, removeLevel, activeTimeframe, getFilteredLevels } = useResearch();
+  const { lastPrice, isLive } = useLivePrice();
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -277,6 +333,30 @@ export default function LiquidityLevelList() {
   // Show levels for active timeframe
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const sortedLevels = [...filteredLevels].sort((a, b) => b.price - a.price);
+
+  // ── "Crossed since last close" ────────────────────────────────────────────
+  // Read the session-close snapshot once on mount (useMemo with [] deps so it
+  // never re-reads after the app restarts; a page reload would re-init anyway).
+  const closeSnapshot = useMemo(() => readSessionCloseSnapshot(), []);
+  const crossedIds = useMemo(
+    () => computeCrossedIds(closeSnapshot, lastPrice),
+    [closeSnapshot, lastPrice],
+  );
+  // Direction price moved since last close: 'up' | 'down' | null
+  const crossDirection = useMemo(() => {
+    if (!closeSnapshot || closeSnapshot.price <= 0 || lastPrice <= 0) return null;
+    return lastPrice > closeSnapshot.price ? 'up' : 'down';
+  }, [closeSnapshot, lastPrice]);
+
+  // ── Price-position insertion index ────────────────────────────────────────
+  // Index into sortedLevels after which we insert the current-price row.
+  // sortedLevels is descending by price; we want the row just before the first
+  // level whose price is <= lastPrice (i.e. after all levels above current price).
+  const priceInsertIdx = useMemo(() => {
+    if (lastPrice <= 0 || sortedLevels.length === 0) return null;
+    const idx = sortedLevels.findIndex((l) => l.price <= lastPrice);
+    return idx === -1 ? sortedLevels.length : idx; // -1 means price is below all levels
+  }, [sortedLevels, lastPrice]);
 
   return (
     <div className="panel flex flex-col h-full">
@@ -448,118 +528,164 @@ export default function LiquidityLevelList() {
           </div>
         )}
 
-        {sortedLevels.map((level) => {
+        {sortedLevels.map((level, idx) => {
           const strength = getStrengthConfig(level.strength);
           const isSwept = level.sweep_status === 'Swept';
           const isEditing = editingId === level.id;
+          const wasCrossed = crossedIds.has(level.id);
+
+          // Insert the current-price row just before the first level at-or-below price
+          const priceRow = (lastPrice > 0 && priceInsertIdx === idx) ? (
+            <div key="__price_marker__" className="flex items-center gap-1.5 py-0.5 my-0.5">
+              <div className="flex-1 h-px bg-white/20" />
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 border border-white/20">
+                <div className={cn('w-1.5 h-1.5 rounded-full', isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')} />
+                <span className="text-[9px] font-mono text-white/80 tabular-nums">{lastPrice.toFixed(2)}</span>
+                <ArrowRight size={8} className="text-white/40" />
+              </div>
+              <div className="flex-1 h-px bg-white/20" />
+            </div>
+          ) : null;
 
           if (isEditing && editForm) {
             return (
-              <form key={level.id} onSubmit={(e) => { e.preventDefault(); saveEdit(); }}
-                className="space-y-2 p-2 bg-terminal-bg rounded border border-accent-blue/30 mb-1">
-                <div className="grid grid-cols-2 gap-1">
-                  <input placeholder="Label" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="text-xs" />
-                  <input type="number" step="0.01" placeholder="Price" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} className="text-xs" required />
-                </div>
-                <div className="grid grid-cols-2 gap-1">
-                  <select value={editForm.side} onChange={(e) => setEditForm({ ...editForm, side: e.target.value })} className="text-xs">
-                    {LIQUIDITY_SIDES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <select value={editForm.pool_type} onChange={(e) => setEditForm({ ...editForm, pool_type: e.target.value })} className="text-xs">
-                    {POOL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div className="grid grid-cols-3 gap-1">
-                  <select value={editForm.strength} onChange={(e) => setEditForm({ ...editForm, strength: e.target.value })} className="text-xs">
-                    {STRENGTH_LEVELS.map((s) => <option key={s.level} value={s.level}>{s.level} — {s.label}</option>)}
-                  </select>
-                  <select value={editForm.timeframe} onChange={(e) => setEditForm({ ...editForm, timeframe: e.target.value })} className="text-xs">
-                    {TIMEFRAMES.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
-                  </select>
-                  <select value={editForm.sweep_status} onChange={(e) => setEditForm({ ...editForm, sweep_status: e.target.value })} className="text-xs">
-                    {SWEEP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <input placeholder="Notes" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} className="w-full text-xs" />
-                <div className="flex gap-1">
-                  <button type="submit" className="btn btn-primary flex-1 text-[10px]">Save</button>
-                  <button type="button" onClick={cancelEdit} className="btn btn-ghost text-[10px]">Cancel</button>
-                </div>
-              </form>
+              <React.Fragment key={level.id}>
+                {priceRow}
+                <form onSubmit={(e) => { e.preventDefault(); saveEdit(); }}
+                  className="space-y-2 p-2 bg-terminal-bg rounded border border-accent-blue/30 mb-1">
+                  <div className="grid grid-cols-2 gap-1">
+                    <input placeholder="Label" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="text-xs" />
+                    <input type="number" step="0.01" placeholder="Price" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} className="text-xs" required />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <select value={editForm.side} onChange={(e) => setEditForm({ ...editForm, side: e.target.value })} className="text-xs">
+                      {LIQUIDITY_SIDES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <select value={editForm.pool_type} onChange={(e) => setEditForm({ ...editForm, pool_type: e.target.value })} className="text-xs">
+                      {POOL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    <select value={editForm.strength} onChange={(e) => setEditForm({ ...editForm, strength: e.target.value })} className="text-xs">
+                      {STRENGTH_LEVELS.map((s) => <option key={s.level} value={s.level}>{s.level} — {s.label}</option>)}
+                    </select>
+                    <select value={editForm.timeframe} onChange={(e) => setEditForm({ ...editForm, timeframe: e.target.value })} className="text-xs">
+                      {TIMEFRAMES.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
+                    </select>
+                    <select value={editForm.sweep_status} onChange={(e) => setEditForm({ ...editForm, sweep_status: e.target.value })} className="text-xs">
+                      {SWEEP_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <input placeholder="Notes" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} className="w-full text-xs" />
+                  <div className="flex gap-1">
+                    <button type="submit" className="btn btn-primary flex-1 text-[10px]">Save</button>
+                    <button type="button" onClick={cancelEdit} className="btn btn-ghost text-[10px]">Cancel</button>
+                  </div>
+                </form>
+              </React.Fragment>
             );
           }
 
           return (
-            <div
-              key={level.id}
-              className={`flex items-center gap-2 p-1.5 rounded border transition-colors group ${
-                isSwept
-                  ? 'bg-terminal-bg/50 border-terminal-border/50 opacity-60'
-                  : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light'
-              }`}
-            >
-              {/* Side indicator */}
-              <div className={`w-1 h-8 rounded-full ${
-                level.side === 'Buy-Side' ? 'bg-cyan-500' : 'bg-orange-500'
-              }`} />
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <StrengthDot strength={level.strength} />
-                  <span className={`text-xs font-medium truncate ${isSwept ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
-                    {level.name || level.pool_type}
-                  </span>
-                  <span className="text-[9px] text-slate-600">{level.timeframe}</span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] tabular-nums text-slate-400">
-                    {level.price.toFixed(2)}
-                  </span>
-                  <span className={`text-[9px] ${level.side === 'Buy-Side' ? 'text-cyan-600' : 'text-orange-600'}`}>
-                    {level.side === 'Buy-Side' ? 'BSL' : 'SSL'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Sweep Status Badge */}
-              <SweepBadge
-                status={level.sweep_status}
-                onCycle={() => cycleSweepStatus(level)}
-              />
-
-              {/* AVWAP toggle */}
-              <button
-                onClick={() => toggleAvwapPlan(level)}
-                className={cn('text-[8px] px-1 py-0.5 rounded border transition-all',
-                  hasAvwapPlan(level.id)
-                    ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-                    : 'opacity-0 group-hover:opacity-100 text-zinc-600 border-zinc-700 hover:text-purple-400 hover:border-purple-500/30'
+            <React.Fragment key={level.id}>
+              {priceRow}
+              <div
+                className={cn(
+                  'flex items-center gap-2 p-1.5 rounded border transition-colors group',
+                  isSwept
+                    ? 'bg-terminal-bg/50 border-terminal-border/50 opacity-60'
+                    : wasCrossed
+                    ? 'bg-violet-500/5 border-violet-500/30 hover:border-violet-400/50'
+                    : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light',
                 )}
-                title={hasAvwapPlan(level.id) ? 'AVWAP planned — click to remove' : 'Plan AVWAP anchor on sweep'}
               >
-                V
-              </button>
+                {/* Side indicator */}
+                <div className={`w-1 h-8 rounded-full ${
+                  level.side === 'Buy-Side' ? 'bg-cyan-500' : 'bg-orange-500'
+                }`} />
 
-              {/* Edit */}
-              <button
-                onClick={() => startEdit(level)}
-                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-accent-blue transition-all"
-                title="Edit level"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-              </button>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <StrengthDot strength={level.strength} />
+                    <span className={`text-xs font-medium truncate ${isSwept ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                      {level.name || level.pool_type}
+                    </span>
+                    <span className="text-[9px] text-slate-600">{level.timeframe}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] tabular-nums text-slate-400">
+                      {level.price.toFixed(2)}
+                    </span>
+                    <span className={`text-[9px] ${level.side === 'Buy-Side' ? 'text-cyan-600' : 'text-orange-600'}`}>
+                      {level.side === 'Buy-Side' ? 'BSL' : 'SSL'}
+                    </span>
+                    {/* Distance from current price */}
+                    {lastPrice > 0 && (
+                      <span className="text-[9px] text-slate-600 tabular-nums">
+                        {level.price > lastPrice ? '+' : ''}{(level.price - lastPrice).toFixed(1)}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-              {/* Remove */}
-              <button
-                onClick={() => removeLevel(level.id)}
-                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all"
-              >
-                <X size={12} />
-              </button>
-            </div>
+                {/* Crossed-while-closed badge */}
+                {wasCrossed && !isSwept && (
+                  <CrossedBadge direction={crossDirection} />
+                )}
+
+                {/* Sweep Status Badge */}
+                <SweepBadge
+                  status={level.sweep_status}
+                  onCycle={() => cycleSweepStatus(level)}
+                />
+
+                {/* AVWAP toggle */}
+                <button
+                  onClick={() => toggleAvwapPlan(level)}
+                  className={cn('text-[8px] px-1 py-0.5 rounded border transition-all',
+                    hasAvwapPlan(level.id)
+                      ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                      : 'opacity-0 group-hover:opacity-100 text-zinc-600 border-zinc-700 hover:text-purple-400 hover:border-purple-500/30'
+                  )}
+                  title={hasAvwapPlan(level.id) ? 'AVWAP planned — click to remove' : 'Plan AVWAP anchor on sweep'}
+                >
+                  V
+                </button>
+
+                {/* Edit */}
+                <button
+                  onClick={() => startEdit(level)}
+                  className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-accent-blue transition-all"
+                  title="Edit level"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </button>
+
+                {/* Remove */}
+                <button
+                  onClick={() => removeLevel(level.id)}
+                  className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </React.Fragment>
           );
         })}
+
+        {/* Price row at the very bottom when price is below all levels */}
+        {lastPrice > 0 && priceInsertIdx === sortedLevels.length && sortedLevels.length > 0 && (
+          <div className="flex items-center gap-1.5 py-0.5 my-0.5">
+            <div className="flex-1 h-px bg-white/20" />
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10 border border-white/20">
+              <div className={cn('w-1.5 h-1.5 rounded-full', isLive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500')} />
+              <span className="text-[9px] font-mono text-white/80 tabular-nums">{lastPrice.toFixed(2)}</span>
+              <ArrowRight size={8} className="text-white/40" />
+            </div>
+            <div className="flex-1 h-px bg-white/20" />
+          </div>
+        )}
       </div>
     </div>
   );
