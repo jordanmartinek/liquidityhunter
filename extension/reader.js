@@ -8,6 +8,16 @@
 
 const POLL_INTERVAL = 1000;
 
+// Plausible price band for the supported index futures (ES ~4k–7k, NQ ~15k–25k,
+// MES/MNQ mirror them). Used as a sanity filter so we never stream a parsed
+// number that can't be a real quote for these instruments. One shared band —
+// no NQ-only assumptions — so valid ES prices are never rejected.
+const PRICE_MIN = 1000;
+const PRICE_MAX = 50000;
+function inPriceRange(v) {
+  return typeof v === 'number' && !isNaN(v) && v > PRICE_MIN && v < PRICE_MAX;
+}
+
 // Parse a TradingView legend number like "29,517.00" or "−7.75" → Number|null
 function parseNum(text) {
   if (!text) return null;
@@ -35,8 +45,7 @@ function extractOHLC() {
   }
   if (nums.length < 4) return null;
   const [open, high, low, close] = nums;
-  const inRange = (v) => v > 1000 && v < 50000;
-  if (![open, high, low, close].every(inRange)) return null;
+  if (![open, high, low, close].every(inPriceRange)) return null;
   // Consistency: high is the max, low is the min of the bar.
   if (high < Math.max(open, close) - 0.01) return null;
   if (low > Math.min(open, close) + 0.01) return null;
@@ -47,7 +56,7 @@ function extractOHLC() {
   let volume = null;
   for (let i = 4; i < nums.length; i++) {
     const v = nums[i];
-    if (v > 0 && !inRange(v)) { volume = v; break; }
+    if (v > 0 && !inPriceRange(v)) { volume = v; break; }
   }
   return { open, high, low, close, volume };
 }
@@ -63,7 +72,7 @@ function extractPrice() {
   if (legendValues.length >= 4) {
     const closeText = legendValues[3].textContent.trim().replace(/[,\s]/g, '');
     const closePrice = parseFloat(closeText);
-    if (closePrice > 1000 && closePrice < 50000 && !isNaN(closePrice)) {
+    if (inPriceRange(closePrice)) {
       return closePrice;
     }
   }
@@ -75,7 +84,7 @@ function extractPrice() {
   for (const el of buttons) {
     const text = el.textContent.trim().replace(/[,\s]/g, '');
     const price = parseFloat(text);
-    if (price > 1000 && price < 50000 && !isNaN(price)) {
+    if (inPriceRange(price)) {
       buttonPrices.push(price);
     }
   }
@@ -90,12 +99,14 @@ function extractPrice() {
   for (const el of legendValues) {
     const text = el.textContent.trim().replace(/[,\s]/g, '');
     const price = parseFloat(text);
-    if (price > 1000 && price < 50000 && !isNaN(price)) {
+    if (inPriceRange(price)) {
       return price;
     }
   }
 
-  // Priority 3: Brute force
+  // Priority 4: Brute force — scan short text nodes for a plausible price.
+  // Uses the same shared band as everything else (not the old NQ-only
+  // 15000–35000, which silently rejected valid ES prices).
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while (node = walker.nextNode()) {
@@ -103,7 +114,7 @@ function extractPrice() {
     if (text.length > 12 || text.length < 5) continue;
     const cleaned = text.replace(/[,\s]/g, '');
     const price = parseFloat(cleaned);
-    if (price > 15000 && price < 35000 && !isNaN(price)) {
+    if (inPriceRange(price)) {
       return price;
     }
   }
@@ -172,7 +183,7 @@ function poll() {
   }
 }
 
-console.log('[LH Bridge] Reader active v1.6.0 — price = last-traded (legend Close); writing every 1s');
+console.log('[LH Bridge] Reader active v1.7.0 — price = last-traded (legend Close); writing every 1s');
 showStatus(false);
 setInterval(poll, POLL_INTERVAL);
 setTimeout(poll, 2000);
