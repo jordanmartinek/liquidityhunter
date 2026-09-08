@@ -21,6 +21,7 @@ import WeeklyHeatmap from '@/components/trading/WeeklyHeatmap';
 import AlertZonesPanel from '@/components/trading/AlertZonesPanel';
 import GamificationPanel from '@/components/trading/GamificationPanel';
 import CollapsibleSection from '@/components/trading/CollapsibleSection';
+import { useResearch } from '@/lib/researchStore';
 import { cn } from '@/lib/utils';
 
 // Default open/closed state for the right-rail Analysis sections.
@@ -44,6 +45,9 @@ export default function ResearchCockpit() {
   const [centerView, setCenterView] = useState('chart'); // 'chart' | 'ladder'
   const [rightPanel, setRightPanel] = useState('analysis'); // 'analysis' | 'paper'
   const [ladderFullscreen, setLadderFullscreen] = useState(false); // fullscreen ladder mode
+
+  // Overnight/away level-crossing review (levels price moved past while gone).
+  const { crossedLevels, dismissCrossedLevels, markCrossedLevelsSwept } = useResearch();
 
   // Collapsible right-rail sections — persisted so your layout sticks.
   const [sections, setSections] = useState(() => {
@@ -154,6 +158,26 @@ export default function ResearchCockpit() {
           <span className="flex-1">{dbError.message}</span>
           <button onClick={() => setDbError(null)} aria-label="Dismiss"
             className="text-amber-300/70 hover:text-white text-[12px] leading-none">✕</button>
+        </div>
+      )}
+
+      {/* Overnight catch-up — levels price moved past while you were away */}
+      {crossedLevels && crossedLevels.length > 0 && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-cyan-500/15 border-b border-cyan-500/40 text-[11px] text-cyan-100">
+          <span>🌙</span>
+          <span className="flex-1">
+            Price moved past <b>{crossedLevels.length}</b> level{crossedLevels.length > 1 ? 's' : ''} while you were away
+            <span className="text-cyan-300/70">
+              {' — '}{crossedLevels.slice(0, 4).map(l => l.name || l.pool_type || l.price.toFixed(0)).join(', ')}
+              {crossedLevels.length > 4 ? '…' : ''}
+            </span>
+          </span>
+          <button onClick={markCrossedLevelsSwept}
+            className="shrink-0 text-[10px] px-2 py-0.5 rounded border border-cyan-400/50 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30">
+            Mark all swept
+          </button>
+          <button onClick={dismissCrossedLevels} aria-label="Dismiss"
+            className="text-cyan-300/70 hover:text-white text-[12px] leading-none">✕</button>
         </div>
       )}
 
