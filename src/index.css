@@ -94,7 +94,7 @@ body {
 /* ─── Form-control safety net ──────────────────────────────────────────── */
 /* App-wide default so a form control that forgets its own colors is never
    invisible (e.g. white text on a white default background). Components that
-   set their own bg-*/text-* Tailwind classes still win via specificity/order;
+   set their own Tailwind color utilities still win via specificity/order;
    this only fills the gap for bare inputs. */
 @layer base {
   input, select, textarea {
