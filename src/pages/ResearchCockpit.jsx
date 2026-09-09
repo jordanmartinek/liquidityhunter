@@ -146,6 +146,24 @@ export default function ResearchCockpit() {
     return () => window.removeEventListener('lh:db-error', onDbError);
   }, []);
 
+  // Toast when a level is captured from the chart (extension click-to-mark).
+  const [chartToast, setChartToast] = useState(null); // { price, side }
+  const chartToastTimer = useRef(null);
+  useEffect(() => {
+    const onLevelFromChart = (e) => {
+      const { price, side } = e.detail || {};
+      if (!(price > 0)) return;
+      setChartToast({ price, side });
+      if (chartToastTimer.current) clearTimeout(chartToastTimer.current);
+      chartToastTimer.current = setTimeout(() => setChartToast(null), 3200);
+    };
+    window.addEventListener('lh:level-from-chart', onLevelFromChart);
+    return () => {
+      window.removeEventListener('lh:level-from-chart', onLevelFromChart);
+      if (chartToastTimer.current) clearTimeout(chartToastTimer.current);
+    };
+  }, []);
+
   // Panel density — scales the rails so you can dial the whole app up/down.
   const DENSITY_SCALE = { compact: 0.85, normal: 1, comfortable: 1.15 };
   const DENSITY_ORDER = ['compact', 'normal', 'comfortable'];
@@ -276,6 +294,12 @@ export default function ResearchCockpit() {
     <div className="flex-1 flex flex-col min-w-0 min-h-[300px] md:min-h-0">
       <div className="flex items-center gap-2 shrink-0 border-b border-terminal-border bg-terminal-surface px-2 py-1.5">
         <WorkspaceModeToggle value={centerView} onChange={(v) => { setCenterView(v); setStage(v === 'ladder' ? 'map' : stage); }} />
+        {centerView === 'chart' && (
+          <span className="hidden lg:flex items-center gap-1 text-[9px] text-slate-600" title="Requires the LiquidityHunter browser extension and an open TradingView tab. In that tab, toggle ⌖ Mark (or Alt+M) and click a price.">
+            <Crosshair size={10} className="text-slate-600" />
+            Tip: in your TradingView tab, use <span className="text-slate-500">⌖ Mark</span> to click prices into your levels
+          </span>
+        )}
         {centerView === 'ladder' && <LadderTimeframeTabs />}
         {centerView === 'ladder' && (
           <button
@@ -341,6 +365,24 @@ export default function ResearchCockpit() {
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-terminal-bg md:h-screen md:overflow-hidden">
+      {/* Toast: level captured from the chart via the extension */}
+      {chartToast && (
+        <div className="fixed top-3 right-3 z-[300] animate-fade-in flex items-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/40 bg-terminal-surface/95 backdrop-blur shadow-lg shadow-black/40">
+          <Crosshair size={14} className="text-cyan-300 shrink-0" />
+          <div className="flex flex-col leading-tight">
+            <span className="text-[11px] text-slate-200">
+              Level added from chart:{' '}
+              <span className="font-mono tabular-nums text-cyan-300">{chartToast.price.toFixed(2)}</span>
+            </span>
+            <span className="text-[9px] text-slate-500">
+              {chartToast.side === 'Buy-Side' ? 'BSL (above price)' : 'SSL (below price)'} · tap the level to refine
+            </span>
+          </div>
+          <button onClick={() => setChartToast(null)} aria-label="Dismiss"
+            className="ml-1 text-slate-500 hover:text-white text-[12px] leading-none">✕</button>
+        </div>
+      )}
+
       <WorkspaceHeader stage={stage} onStage={goToStage} />
 
       {/* Data-integrity banner */}

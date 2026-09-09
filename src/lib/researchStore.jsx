@@ -238,6 +238,57 @@ export function ResearchProvider({ children }) {
     return levels.filter((l) => l.timeframe === timeframe);
   }, [levels]);
 
+  // ─── Click-to-mark levels from TradingView (via the extension) ─
+  // The extension queues clicked prices into localStorage `lh_pending_levels`
+  // (relayed from chrome.storage by writer.js). We drain that queue here,
+  // turning each into a real liquidity level, then clear it. Side is inferred
+  // from where the price sits relative to current price (above → Buy-Side /
+  // BSL, below → Sell-Side / SSL); the trader can refine it afterward.
+  const PENDING_LEVELS_KEY = 'lh_pending_levels';
+  const processedMarkIdsRef = useRef(new Set());
+  useEffect(() => {
+    function drainPendingLevels() {
+      let queue;
+      try {
+        queue = JSON.parse(localStorage.getItem(PENDING_LEVELS_KEY) || '[]');
+      } catch { queue = []; }
+      if (!Array.isArray(queue) || queue.length === 0) return;
+
+      const fresh = queue.filter((item) => item && item.id && !processedMarkIdsRef.current.has(item.id) && item.price > 0);
+      if (fresh.length > 0) {
+        fresh.forEach((item) => {
+          processedMarkIdsRef.current.add(item.id);
+          const price = Math.round(item.price * 100) / 100;
+          const ref = prevLivePriceRef.current || 0;
+          const side = ref > 0 ? (price >= ref ? 'Buy-Side' : 'Sell-Side') : 'Buy-Side';
+          const created = addLevel({
+            price,
+            side,
+            pool_type: 'Custom',
+            strength: 3,
+            timeframe: 'Unified',
+            sweep_status: 'Untouched',
+            name: '',
+            notes: 'Marked from chart',
+          });
+          try {
+            window.dispatchEvent(new CustomEvent('lh:level-from-chart', {
+              detail: { price, side, id: created && created.id },
+            }));
+          } catch {}
+        });
+      }
+      // Clear the queue once drained so it never reprocesses or grows.
+      try { localStorage.setItem(PENDING_LEVELS_KEY, '[]'); } catch {}
+    }
+
+    drainPendingLevels();
+    const interval = setInterval(drainPendingLevels, 1000);
+    const onStorage = (e) => { if (e.key === PENDING_LEVELS_KEY) drainPendingLevels(); };
+    window.addEventListener('storage', onStorage);
+    return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
+  }, [addLevel]);
+
   // ─── Session-close snapshot (for "levels crossed while closed") ─
   // Written on beforeunload / visibilitychange→hidden so the next session
   // can compare its starting price against this snapshot and flag any levels

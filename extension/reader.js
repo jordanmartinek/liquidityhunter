@@ -183,7 +183,169 @@ function poll() {
   }
 }
 
-console.log('[LH Bridge] Reader active v1.7.0 — price = last-traded (legend Close); writing every 1s');
+console.log('[LH Bridge] Reader active v1.8.0 — price = last-traded (legend Close); writing every 1s; click-to-mark levels enabled');
 showStatus(false);
 setInterval(poll, POLL_INTERVAL);
 setTimeout(poll, 2000);
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CLICK-TO-MARK LEVELS
+   A toggleable "Mark" mode. While on, clicking anywhere on the chart reads the
+   price at that vertical position and queues a level request in
+   chrome.storage.local (key `lh_pending_levels`). writer.js on the app page
+   drains that queue into the app, where it becomes a real liquidity level.
+
+   Reading the clicked price uses a robust chain:
+     1) TradingView's crosshair price label on the right price scale (exact).
+     2) Otherwise, calibrate from the visible price-axis tick labels and map the
+        click's Y pixel to a price by linear interpolation (approximate).
+   Both are validated against the same plausible price band as the live feed.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let markMode = false;
+
+// ── Read the price shown in TradingView's crosshair label on the price axis ──
+// When the crosshair is active, TV renders a small floating price pill on the
+// right axis. We look for an axis-area element whose text parses as a price.
+function readCrosshairAxisPrice() {
+  // TV's price-axis crosshair label carries a class containing "axis" +
+  // "crosshair"/"currentPrice"/"price". Be permissive: scan likely candidates.
+  const selectors = [
+    '[class*="priceAxis"] [class*="crosshair"]',
+    '[class*="price-axis"] [class*="crosshair"]',
+    '[class*="crosshairLabel"]',
+    '[class*="axisCrosshair"]',
+    '[class*="priceScale"] [class*="crosshair"]',
+  ];
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) {
+      const n = parseNum((el.textContent || '').trim());
+      if (inPriceRange(n)) return n;
+    }
+  }
+  return null;
+}
+
+// ── Fallback: map a click Y coordinate to a price using visible axis ticks ──
+// Collects numeric labels on the right price scale, pairs each with its on-screen
+// Y midpoint, then linearly interpolates the clicked Y to a price. Approximate,
+// but good enough to drop a level near where you clicked when no crosshair pill
+// is available.
+function priceFromClickY(clickY) {
+  const axis = document.querySelector('[class*="priceAxis"], [class*="price-axis"], [class*="priceScale"]');
+  const scope = axis || document.body;
+  const points = [];
+  for (const el of scope.querySelectorAll('*')) {
+    const txt = (el.textContent || '').trim();
+    if (txt.length === 0 || txt.length > 12) continue;
+    const n = parseNum(txt);
+    if (!inPriceRange(n)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.height === 0 || r.height > 40) continue; // skip big containers
+    points.push({ price: n, y: r.top + r.height / 2 });
+  }
+  if (points.length < 2) return null;
+  // Use the two ticks that best bracket the click (or the extremes).
+  points.sort((a, b) => a.y - b.y);
+  let lo = points[0];
+  let hi = points[points.length - 1];
+  for (let i = 0; i < points.length - 1; i++) {
+    if (points[i].y <= clickY && points[i + 1].y >= clickY) {
+      lo = points[i]; hi = points[i + 1]; break;
+    }
+  }
+  if (hi.y === lo.y) return null;
+  // Y grows downward while price grows upward → invert.
+  const t = (clickY - lo.y) / (hi.y - lo.y);
+  const price = lo.price + t * (hi.price - lo.price);
+  return inPriceRange(price) ? price : null;
+}
+
+function queueLevel(price) {
+  const rounded = Math.round(price * 100) / 100;
+  chrome.storage.local.get(['lh_pending_levels'], (result) => {
+    if (chrome.runtime.lastError) return;
+    const queue = Array.isArray(result && result.lh_pending_levels) ? result.lh_pending_levels : [];
+    queue.push({
+      id: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      price: rounded,
+      timestamp: Date.now(),
+      source: 'tradingview-click',
+    });
+    // Cap the queue so a stale/unread app tab can't grow it unbounded.
+    chrome.storage.local.set({ lh_pending_levels: queue.slice(-25) });
+  });
+  flashMarker(rounded);
+}
+
+// Brief visual confirmation on the TV page that a level was captured.
+function flashMarker(price) {
+  const badge = document.createElement('div');
+  badge.textContent = `⌖ Marked ${price.toFixed(2)} → LiquidityHunter`;
+  badge.style.cssText = `
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 100000; background: rgba(6,182,212,0.95); color: #04222b;
+    font: 600 13px/1 monospace; padding: 8px 14px; border-radius: 6px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.4); pointer-events: none;
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  `;
+  document.body.appendChild(badge);
+  requestAnimationFrame(() => {
+    badge.style.opacity = '0';
+    badge.style.transform = 'translate(-50%, -70%)';
+  });
+  setTimeout(() => badge.remove(), 500);
+}
+
+function onChartClick(e) {
+  if (!markMode) return;
+  // Ignore clicks on the toggle button / status pill themselves.
+  const t = e.target;
+  if (t && (t.id === 'lh-mark-toggle' || t.closest?.('#lh-mark-toggle'))) return;
+  const price = readCrosshairAxisPrice() ?? priceFromClickY(e.clientY);
+  if (price !== null) {
+    queueLevel(price);
+  } else {
+    console.warn('[LH Bridge] Could not read a price for that click — move the crosshair onto the chart and try again.');
+  }
+}
+
+function setMarkMode(on) {
+  markMode = on;
+  const btn = document.getElementById('lh-mark-toggle');
+  if (btn) {
+    btn.style.background = on ? '#0d9488' : '#27272a';
+    btn.style.borderColor = on ? '#2dd4bf' : '#3f3f46';
+    btn.textContent = on ? '⌖ Marking — click a price' : '⌖ Mark level';
+  }
+  // Use a crosshair cursor over the page while marking.
+  document.body.style.cursor = on ? 'crosshair' : '';
+}
+
+function buildMarkToggle() {
+  if (document.getElementById('lh-mark-toggle')) return;
+  const btn = document.createElement('button');
+  btn.id = 'lh-mark-toggle';
+  btn.type = 'button';
+  btn.textContent = '⌖ Mark level';
+  btn.style.cssText = `
+    position: fixed; bottom: 34px; right: 8px; z-index: 99999;
+    background: #27272a; color: #e2e8f0; border: 1px solid #3f3f46;
+    font: 600 11px/1 monospace; padding: 5px 10px; border-radius: 4px;
+    cursor: pointer; opacity: 0.9; transition: all 0.2s;
+  `;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMarkMode(!markMode);
+  });
+  document.body.appendChild(btn);
+}
+
+buildMarkToggle();
+// Capture-phase so we read the price before TV's own handlers mutate the DOM.
+document.addEventListener('click', onChartClick, true);
+// Keyboard shortcut: Alt+M toggles mark mode; Esc exits it.
+document.addEventListener('keydown', (e) => {
+  if (e.altKey && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); setMarkMode(!markMode); }
+  else if (e.key === 'Escape' && markMode) { setMarkMode(false); }
+});
