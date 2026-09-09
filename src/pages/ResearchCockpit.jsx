@@ -151,9 +151,9 @@ export default function ResearchCockpit() {
   const chartToastTimer = useRef(null);
   useEffect(() => {
     const onLevelFromChart = (e) => {
-      const { price, side } = e.detail || {};
+      const { price, side, zone } = e.detail || {};
       if (!(price > 0)) return;
-      setChartToast({ price, side });
+      setChartToast({ price, side, zone });
       if (chartToastTimer.current) clearTimeout(chartToastTimer.current);
       chartToastTimer.current = setTimeout(() => setChartToast(null), 3200);
     };
@@ -371,11 +371,15 @@ export default function ResearchCockpit() {
           <Crosshair size={14} className="text-cyan-300 shrink-0" />
           <div className="flex flex-col leading-tight">
             <span className="text-[11px] text-slate-200">
-              Level added from chart:{' '}
-              <span className="font-mono tabular-nums text-cyan-300">{chartToast.price.toFixed(2)}</span>
+              {chartToast.zone ? 'Zone added from chart:' : 'Level added from chart:'}{' '}
+              <span className="font-mono tabular-nums text-cyan-300">
+                {chartToast.zone
+                  ? `${chartToast.zone.low.toFixed(2)}–${chartToast.zone.high.toFixed(2)}`
+                  : chartToast.price.toFixed(2)}
+              </span>
             </span>
             <span className="text-[9px] text-slate-500">
-              {chartToast.side === 'Buy-Side' ? 'BSL (above price)' : 'SSL (below price)'} · tap the level to refine
+              {chartToast.side === 'Buy-Side' ? 'BSL' : 'SSL'} · tap the level to refine
             </span>
           </div>
           <button onClick={() => setChartToast(null)} aria-label="Dismiss"

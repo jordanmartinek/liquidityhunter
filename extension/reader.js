@@ -214,7 +214,7 @@ function poll() {
   }
 }
 
-console.log(`[LH Bridge] Reader v1.8.3 active in ${IS_TOP_FRAME ? 'TOP frame' : 'sub-frame'} — click-to-mark levels enabled`);
+console.log(`[LH Bridge] Reader v1.9.0 active in ${IS_TOP_FRAME ? 'TOP frame' : 'sub-frame'} — click-to-mark levels enabled (side modifiers + zone mode)`);
 // The price poll + status badge belong to the top frame only. Sub-frames still
 // run the click listener (below) so clicks on the chart canvas are captured.
 if (IS_TOP_FRAME) {
@@ -238,6 +238,21 @@ if (IS_TOP_FRAME) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 let markMode = false;
+
+// Zone sub-mode: when on, marking takes TWO clicks (the two edges of a band)
+// and queues a single banded level. `zoneAnchor` holds the first edge's price
+// while we wait for the second click.
+let zoneMode = false;
+let zoneAnchor = null; // { price } | null
+
+// Resolve the side for a click from its modifier keys:
+//   Shift → force Buy-Side (BSL);  Ctrl/Cmd → force Sell-Side (SSL);
+//   neither → undefined (let the app infer from price vs current price).
+function sideFromEvent(e) {
+  if (e.shiftKey) return 'Buy-Side';
+  if (e.ctrlKey || e.metaKey) return 'Sell-Side';
+  return undefined;
+}
 
 // ── Read the price shown in TradingView's crosshair label on the price axis ──
 // When the crosshair is active, TV renders a small floating price pill on the
@@ -314,21 +329,34 @@ function priceFromClickY(clickY) {
 // click is never silently lost. Updated each successful poll.
 let lastKnownPrice = null;
 
-function queueLevel(price) {
+// Queue a marked level. `opts` may carry:
+//   side:     'Buy-Side' | 'Sell-Side' | undefined  (undefined → app infers)
+//   poolType: e.g. 'Equal Highs' | undefined         (undefined → app default)
+//   zone:     { high, low } for a two-click band     (price is then the midpoint)
+function queueLevel(price, opts = {}) {
   const rounded = Math.round(price * 100) / 100;
   if (!extensionAlive()) {
     console.warn('[LH Bridge] Cannot save marked level — reload this TradingView tab after (re)loading the extension.');
     return;
   }
+  const record = {
+    id: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    price: rounded,
+    timestamp: Date.now(),
+    source: 'tradingview-click',
+  };
+  if (opts.side) record.side = opts.side;
+  if (opts.poolType) record.poolType = opts.poolType;
+  if (opts.zone && opts.zone.high > 0 && opts.zone.low > 0) {
+    record.zone = {
+      high: Math.round(opts.zone.high * 100) / 100,
+      low: Math.round(opts.zone.low * 100) / 100,
+    };
+  }
   const append = (result) => {
     if (chrome.runtime && chrome.runtime.lastError) return;
     const queue = Array.isArray(result && result.lh_pending_levels) ? result.lh_pending_levels : [];
-    queue.push({
-      id: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      price: rounded,
-      timestamp: Date.now(),
-      source: 'tradingview-click',
-    });
+    queue.push(record);
     // Cap the queue so a stale/unread app tab can't grow it unbounded.
     try { chrome.storage.local.set({ lh_pending_levels: queue.slice(-25) }); } catch {}
   };
@@ -340,13 +368,15 @@ function queueLevel(price) {
     console.warn('[LH Bridge] Could not queue the marked level (extension context lost).');
     return;
   }
-  flashMarker(rounded);
+  if (record.zone) flashMarker(rounded, `zone ${record.zone.low}–${record.zone.high}`);
+  else flashMarker(rounded, opts.side === 'Buy-Side' ? 'BSL' : opts.side === 'Sell-Side' ? 'SSL' : '');
 }
 
 // Brief visual confirmation on the TV page that a level was captured.
-function flashMarker(price) {
+function flashMarker(price, tag) {
   const badge = document.createElement('div');
-  badge.textContent = `⌖ Marked ${price.toFixed(2)} → LiquidityHunter`;
+  const suffix = tag ? ` (${tag})` : '';
+  badge.textContent = `⌖ Marked ${price.toFixed(2)}${suffix} → LiquidityHunter`;
   badge.style.cssText = `
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     z-index: 100000; background: rgba(6,182,212,0.95); color: #04222b;
@@ -362,41 +392,93 @@ function flashMarker(price) {
   setTimeout(() => badge.remove(), 500);
 }
 
+// Draw a thin labeled horizontal line across the TV page at a given screen Y,
+// so you can see what you've marked without switching tabs. Auto-fades.
+//   color: line/label color; label: text shown on the right end.
+function drawMarkLine(clientY, label, color = 'rgba(6,182,212,0.9)') {
+  const line = document.createElement('div');
+  line.style.cssText = `
+    position: fixed; left: 0; right: 0; top: ${Math.round(clientY)}px; height: 0;
+    border-top: 1.5px dashed ${color}; z-index: 99998; pointer-events: none;
+    transition: opacity 1s ease; opacity: 0.95;
+  `;
+  const tag = document.createElement('span');
+  tag.textContent = label;
+  tag.style.cssText = `
+    position: absolute; right: 64px; top: -8px; background: ${color};
+    color: #04222b; font: 600 10px/1 monospace; padding: 2px 5px; border-radius: 3px;
+  `;
+  line.appendChild(tag);
+  document.body.appendChild(line);
+  // Fade out then remove so overlays don't accumulate.
+  setTimeout(() => { line.style.opacity = '0'; }, 2600);
+  setTimeout(() => line.remove(), 3700);
+}
+
+// Resolve the price at a click using the most-precise-available source.
+function priceAtClick(clientY) {
+  const fromAxis = readCrosshairAxisPrice(clientY);
+  const fromTicks = fromAxis == null ? priceFromClickY(clientY) : null;
+  const price = fromAxis ?? fromTicks ?? lastKnownPrice;
+  const via = fromAxis != null ? 'axis-pill' : fromTicks != null ? 'tick-interp' : (price != null ? 'live-price' : 'none');
+  return { price, via };
+}
+
+function warnNoPrice() {
+  const nPts = axisPoints(collectPricePoints()).length;
+  console.warn(
+    '[LH Bridge] Could not read a price for that click.\n' +
+    `  • price-axis labels found: ${nPts} (need ≥2 for interpolation)\n` +
+    `  • last live price seen: ${lastKnownPrice ?? 'none'} (start the live feed for a guaranteed fallback)\n` +
+    '  • Fix: make sure a chart with a visible right-hand price axis is loaded, ' +
+    'then try again. If the live price badge (● LH) shows a number, any click will still register.'
+  );
+}
+
 function onChartClick(e) {
   if (!markMode) return;
-  // Ignore clicks on the toggle button / status pill themselves.
+  // Ignore clicks on our own UI (toggle button / HUD).
   const t = e.target;
-  if (t && (t.id === 'lh-mark-toggle' || t.closest?.('#lh-mark-toggle'))) return;
+  if (t && (t.id === 'lh-mark-toggle' || t.closest?.('#lh-mark-toggle') || t.closest?.('#lh-mark-hud'))) return;
 
-  // Price-reading chain, most precise first:
-  //  1) the crosshair price pill on the right axis nearest the click,
-  //  2) interpolation from the visible axis ticks at the click's Y,
-  //  3) the current live price (guaranteed fallback — never lose a click).
-  const fromAxis = readCrosshairAxisPrice(e.clientY);
-  const fromTicks = fromAxis == null ? priceFromClickY(e.clientY) : null;
-  const price = fromAxis ?? fromTicks ?? lastKnownPrice;
-
-  const via = fromAxis != null ? 'axis-pill' : fromTicks != null ? 'tick-interp' : (price != null ? 'live-price' : 'none');
+  const { price, via } = priceAtClick(e.clientY);
   console.log(`[LH Bridge] Mark click @Y=${Math.round(e.clientY)} → price=${price ?? 'null'} (via ${via})`);
 
-  if (price != null && inPriceRange(price)) {
-    queueLevel(price);
-  } else {
-    // Rich diagnostics so a failure is never a mystery.
-    const nPts = axisPoints(collectPricePoints()).length;
-    console.warn(
-      '[LH Bridge] Could not read a price for that click.\n' +
-      `  • price-axis labels found: ${nPts} (need ≥2 for interpolation)\n` +
-      `  • last live price seen: ${lastKnownPrice ?? 'none'} (start the live feed for a guaranteed fallback)\n` +
-      '  • Fix: make sure a chart with a visible right-hand price axis is loaded, ' +
-      'then try again. If the live price badge (● LH) shows a number, any click will still register.'
-    );
+  if (!(price != null && inPriceRange(price))) { warnNoPrice(); return; }
+
+  // ── Zone sub-mode: two clicks define a band ──────────────────────────────
+  if (zoneMode) {
+    if (zoneAnchor == null) {
+      zoneAnchor = { price, y: e.clientY };
+      drawMarkLine(e.clientY, `zone edge ${price.toFixed(2)}`, 'rgba(234,179,8,0.9)');
+      updateHud();
+      return;
+    }
+    const high = Math.max(zoneAnchor.price, price);
+    const low = Math.min(zoneAnchor.price, price);
+    const mid = (high + low) / 2;
+    // A band above current price is buy-side (equal highs); below is sell-side.
+    const side = sideFromEvent(e) ?? (lastKnownPrice != null && mid >= lastKnownPrice ? 'Buy-Side' : 'Sell-Side');
+    const poolType = side === 'Buy-Side' ? 'Equal Highs' : 'Equal Lows';
+    queueLevel(mid, { side, poolType, zone: { high, low } });
+    drawMarkLine(zoneAnchor.y, `zone ${low.toFixed(2)}`, 'rgba(6,182,212,0.9)');
+    drawMarkLine(e.clientY, `zone ${high.toFixed(2)}`, 'rgba(6,182,212,0.9)');
+    zoneAnchor = null;
+    updateHud();
+    return;
   }
+
+  // ── Single-price mark ────────────────────────────────────────────────────
+  const side = sideFromEvent(e);
+  queueLevel(price, { side });
+  const color = side === 'Buy-Side' ? 'rgba(6,182,212,0.9)' : side === 'Sell-Side' ? 'rgba(249,115,22,0.9)' : 'rgba(6,182,212,0.9)';
+  drawMarkLine(e.clientY, `${price.toFixed(2)}${side === 'Buy-Side' ? ' BSL' : side === 'Sell-Side' ? ' SSL' : ''}`, color);
 }
 
 // Apply mark-mode UI/cursor in THIS frame (called locally and on storage sync).
 function applyMarkMode(on) {
   markMode = on;
+  if (!on) { zoneAnchor = null; } // leaving mark mode cancels a half-drawn zone
   const btn = document.getElementById('lh-mark-toggle');
   if (btn) {
     btn.style.background = on ? '#0d9488' : '#27272a';
@@ -405,6 +487,47 @@ function applyMarkMode(on) {
   }
   // Crosshair cursor over the page while marking (in whatever frame we're in).
   try { document.body.style.cursor = on ? 'crosshair' : ''; } catch {}
+  updateHud();
+}
+
+// ── Mark-settings HUD (top frame only) ───────────────────────────────────────
+// A small always-visible panel showing how the next click will be interpreted:
+// side mode, zone on/off, and a hint of the modifier shortcuts.
+function buildHud() {
+  if (document.getElementById('lh-mark-hud')) return;
+  const hud = document.createElement('div');
+  hud.id = 'lh-mark-hud';
+  hud.style.cssText = `
+    position: fixed; bottom: 62px; right: 8px; z-index: 99999;
+    background: #0d1320; color: #cbd5e1; border: 1px solid #1e293b;
+    font: 500 10px/1.4 monospace; padding: 6px 8px; border-radius: 5px;
+    max-width: 230px; opacity: 0.94; pointer-events: auto;
+  `;
+  document.body.appendChild(hud);
+  updateHud();
+}
+
+function updateHud() {
+  const hud = document.getElementById('lh-mark-hud');
+  if (!hud) return;
+  if (!markMode) { hud.style.display = 'none'; return; }
+  hud.style.display = 'block';
+  const zoneState = zoneMode
+    ? (zoneAnchor ? '<span style="color:#eab308">ON · click 2nd edge</span>' : '<span style="color:#2dd4bf">ON</span>')
+    : 'off';
+  hud.innerHTML =
+    '<div style="color:#67e8f9;font-weight:700;margin-bottom:2px">⌖ Mark settings</div>' +
+    `<div>Zone (Z): ${zoneState}</div>` +
+    '<div style="margin-top:3px;color:#64748b">Shift-click = BSL · Ctrl/⌘-click = SSL</div>' +
+    '<div style="color:#64748b">plain click = auto side · Esc = exit</div>';
+}
+
+// Toggle zone sub-mode and broadcast so the click frame stays in sync.
+function setZoneMode(on) {
+  zoneMode = on;
+  if (!on) zoneAnchor = null;
+  if (extensionAlive()) { try { chrome.storage.local.set({ lh_zone_mode: on }); } catch {} }
+  updateHud();
 }
 
 // Toggle mark mode and broadcast to all frames via chrome.storage so the click
@@ -435,16 +558,25 @@ function buildMarkToggle() {
   document.body.appendChild(btn);
 }
 
-// UI (toggle button) only in the top frame; the click listener runs everywhere.
-if (IS_TOP_FRAME) buildMarkToggle();
+// UI (toggle button + settings HUD) only in the top frame; the click listener
+// runs everywhere so clicks inside the chart iframe are captured.
+if (IS_TOP_FRAME) { buildMarkToggle(); buildHud(); }
 
 // Capture-phase so we read the price before TV's own handlers mutate the DOM.
 document.addEventListener('click', onChartClick, true);
 
-// Keyboard shortcut: Alt+M toggles mark mode; Esc exits it (works in any frame).
+// Keyboard shortcuts (any frame):
+//   Alt+M → toggle mark mode; Z → toggle zone sub-mode (only while marking);
+//   Esc   → cancel a half-drawn zone, else exit mark mode.
 document.addEventListener('keydown', (e) => {
-  if (e.altKey && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); setMarkMode(!markMode); }
-  else if (e.key === 'Escape' && markMode) { setMarkMode(false); }
+  if (e.altKey && (e.key === 'm' || e.key === 'M')) {
+    e.preventDefault(); setMarkMode(!markMode);
+  } else if (markMode && (e.key === 'z' || e.key === 'Z') && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault(); setZoneMode(!zoneMode);
+  } else if (e.key === 'Escape' && markMode) {
+    if (zoneAnchor) { zoneAnchor = null; updateHud(); } // cancel pending zone first
+    else setMarkMode(false);
+  }
 });
 
 // Keep every frame's mark-mode state in sync (top-frame button ↔ iframe clicks).
@@ -461,9 +593,15 @@ if (extensionAlive()) {
       const p = r && r.lh_live_price && r.lh_live_price.price;
       if (inPriceRange(p)) lastKnownPrice = p;
     });
+    // Seed zone sub-mode in this frame too.
+    chrome.storage.local.get(['lh_zone_mode'], (r) => {
+      if (chrome.runtime && chrome.runtime.lastError) return;
+      if (r && typeof r.lh_zone_mode === 'boolean') { zoneMode = r.lh_zone_mode; updateHud(); }
+    });
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
       if (changes.lh_mark_mode) applyMarkMode(!!changes.lh_mark_mode.newValue);
+      if (changes.lh_zone_mode) { zoneMode = !!changes.lh_zone_mode.newValue; if (!zoneMode) zoneAnchor = null; updateHud(); }
       if (changes.lh_live_price) {
         const p = changes.lh_live_price.newValue && changes.lh_live_price.newValue.price;
         if (inPriceRange(p)) lastKnownPrice = p;
