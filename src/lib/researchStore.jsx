@@ -260,20 +260,32 @@ export function ResearchProvider({ children }) {
           processedMarkIdsRef.current.add(item.id);
           const price = Math.round(item.price * 100) / 100;
           const ref = prevLivePriceRef.current || 0;
-          const side = ref > 0 ? (price >= ref ? 'Buy-Side' : 'Sell-Side') : 'Buy-Side';
+          // Side: honor an explicit choice from the extension (Shift/Ctrl-click
+          // or a zone), else infer from price vs current price.
+          const side = (item.side === 'Buy-Side' || item.side === 'Sell-Side')
+            ? item.side
+            : (ref > 0 ? (price >= ref ? 'Buy-Side' : 'Sell-Side') : 'Buy-Side');
+          // Pool type: honor an explicit choice, else Custom.
+          const pool_type = typeof item.poolType === 'string' && item.poolType ? item.poolType : 'Custom';
+          // Zone band (two-click mark): record the edges in the notes since the
+          // level model is a single price (placed at the band midpoint).
+          const hasZone = item.zone && item.zone.high > 0 && item.zone.low > 0 && item.zone.high !== item.zone.low;
+          const notes = hasZone
+            ? `Marked from chart · zone ${item.zone.low.toFixed(2)}–${item.zone.high.toFixed(2)}`
+            : 'Marked from chart';
           const created = addLevel({
             price,
             side,
-            pool_type: 'Custom',
+            pool_type,
             strength: 3,
             timeframe: 'Unified',
             sweep_status: 'Untouched',
             name: '',
-            notes: 'Marked from chart',
+            notes,
           });
           try {
             window.dispatchEvent(new CustomEvent('lh:level-from-chart', {
-              detail: { price, side, id: created && created.id },
+              detail: { price, side, id: created && created.id, zone: hasZone ? item.zone : null },
             }));
           } catch {}
         });

@@ -35,7 +35,18 @@ You can turn a click on your TradingView chart into a liquidity level in the app
 3. In the **LiquidityHunter** tab, the level appears in your left-hand Levels panel within ~1 second, with a toast confirming it. Its side is inferred from the live price (above → BSL, below → SSL); tap the level to refine type/strength/timeframe.
 4. Click as many prices as you like while Mark mode is on. Press **Esc** or click the button again to exit.
 
-How the price is read: first from TradingView's crosshair price label on the right axis (exact); if that isn't available, it's interpolated from the visible price-axis tick labels (approximate). Both are sanity-checked against a plausible price band.
+### Set the side while marking (v1.9.0+)
+By default the side is inferred from the live price. To set it explicitly at click time:
+- **Shift + click** → force **BSL** (Buy-Side)
+- **Ctrl + click** (⌘ + click on Mac) → force **SSL** (Sell-Side)
+- plain click → auto (above price = BSL, below = SSL)
+
+### Mark a zone (two clicks) (v1.9.0+)
+Press **Z** while marking to toggle **Zone** mode (the on-page HUD shows the current settings). Then click the two edges of a band — the extension captures it as a **single** level placed at the band midpoint, typed **Equal Highs** (buy-side) or **Equal Lows** (sell-side), with the high/low recorded in the level's notes. Press **Z** again to return to single-price marking; **Esc** cancels a half-drawn zone.
+
+Each mark also draws a brief labeled line across the TradingView tab so you can see what you captured without switching tabs.
+
+How the price is read: first from TradingView's crosshair price label on the right axis (exact); if that isn't available, it's interpolated from the visible price-axis tick labels (approximate), then falls back to the current live price. All values are sanity-checked against a plausible price band.
 
 ## Requirements
 
