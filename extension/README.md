@@ -49,6 +49,7 @@ How the price is read: first from TradingView's crosshair price label on the rig
 - **Badge shows but app doesn't show LIVE:** Reload the app tab. The writer script needs to inject.
 - **Price shows 0 or wrong number:** The extension tries multiple DOM selectors. If TradingView changed their layout, the selectors may need updating.
 - **Marked level doesn't appear in the app:** Ensure both tabs are open and the app tab has been loaded since installing/updating the extension (the writer script relays marks every second). If a click warns "Could not read a price," move the crosshair onto the chart area first, then click.
+- **Console error "Extension context invalidated" (at `chrome.storage.local.get`):** This is expected right after you reload or update the extension — the old content script left running in an already-open tab loses access to the extension APIs. **Fix: reload the affected tab(s)** (both TradingView and the app) so a fresh script is injected. As of v1.8.1 the scripts detect this, stop cleanly, and log a one-line notice instead of throwing every second.
 
 ## Supported app origins
 

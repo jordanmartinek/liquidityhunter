@@ -8,6 +8,20 @@
 
 const POLL_INTERVAL = 1000;
 
+let pollTimer = null;
+
+// Is the extension context still alive? After you reload/update or disable the
+// extension, an already-injected content script keeps running but its `chrome.*`
+// APIs are torn down — touching `chrome.storage.local` then throws "Extension
+// context invalidated". Check this BEFORE every API call.
+function extensionAlive() {
+  try {
+    return !!(chrome && chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local);
+  } catch {
+    return false;
+  }
+}
+
 // Plausible price band for the supported index futures (ES ~4k–7k, NQ ~15k–25k,
 // MES/MNQ mirror them). Used as a sanity filter so we never stream a parsed
 // number that can't be a real quote for these instruments. One shared band —
@@ -150,6 +164,13 @@ function showStatus(active, price, ohlc) {
 let missStreak = 0;
 
 function poll() {
+  // Bail out (and stop polling) if the extension was reloaded/disabled — avoids
+  // throwing "Extension context invalidated" on chrome.storage every second.
+  if (!extensionAlive()) {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    console.warn('[LH Bridge] Reader stopped: extension context invalidated. Reload this TradingView tab after (re)loading the extension.');
+    return;
+  }
   const price = extractPrice();
   const ohlc = extractOHLC();
   if (price !== null) {
@@ -169,7 +190,7 @@ function poll() {
         source: 'tradingview',
       };
     }
-    chrome.storage.local.set(payload);
+    try { chrome.storage.local.set(payload); } catch { /* context died mid-poll */ }
     missStreak = 0;
     showStatus(true, price, !!ohlc);
   } else {
@@ -183,9 +204,9 @@ function poll() {
   }
 }
 
-console.log('[LH Bridge] Reader active v1.8.0 — price = last-traded (legend Close); writing every 1s; click-to-mark levels enabled');
+console.log('[LH Bridge] Reader active v1.8.1 — price = last-traded (legend Close); writing every 1s; click-to-mark levels enabled');
 showStatus(false);
-setInterval(poll, POLL_INTERVAL);
+pollTimer = setInterval(poll, POLL_INTERVAL);
 setTimeout(poll, 2000);
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -263,8 +284,12 @@ function priceFromClickY(clickY) {
 
 function queueLevel(price) {
   const rounded = Math.round(price * 100) / 100;
-  chrome.storage.local.get(['lh_pending_levels'], (result) => {
-    if (chrome.runtime.lastError) return;
+  if (!extensionAlive()) {
+    console.warn('[LH Bridge] Cannot save marked level — reload this TradingView tab after (re)loading the extension.');
+    return;
+  }
+  const append = (result) => {
+    if (chrome.runtime && chrome.runtime.lastError) return;
     const queue = Array.isArray(result && result.lh_pending_levels) ? result.lh_pending_levels : [];
     queue.push({
       id: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -273,8 +298,16 @@ function queueLevel(price) {
       source: 'tradingview-click',
     });
     // Cap the queue so a stale/unread app tab can't grow it unbounded.
-    chrome.storage.local.set({ lh_pending_levels: queue.slice(-25) });
-  });
+    try { chrome.storage.local.set({ lh_pending_levels: queue.slice(-25) }); } catch {}
+  };
+  try {
+    const p = chrome.storage.local.get(['lh_pending_levels']);
+    if (p && typeof p.then === 'function') p.then(append).catch(() => {});
+    else chrome.storage.local.get(['lh_pending_levels'], append);
+  } catch {
+    console.warn('[LH Bridge] Could not queue the marked level (extension context lost).');
+    return;
+  }
   flashMarker(rounded);
 }
 
