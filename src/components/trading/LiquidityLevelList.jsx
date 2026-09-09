@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, X, Droplets, Mic, MicOff, ArrowRight } from 'lucide-react';
+import { Plus, X, Droplets, Mic, MicOff, ArrowRight, Crosshair, ClipboardPlus, FlaskConical, Check, Pencil } from 'lucide-react';
 import { useResearch, useLivePrice } from '@/lib/researchStore';
 import { useVoiceInput } from '@/lib/useVoiceInput';
 import { cn } from '@/lib/utils';
+import { paperTradeFromLevel, buildPlanItem } from '@/lib/levelActions';
 import { POOL_TYPES, LIQUIDITY_SIDES, TIMEFRAMES, SWEEP_STATUSES, STRENGTH_LEVELS, getStrengthConfig } from '@/lib/constants';
 
 // ─── Session-close snapshot helpers ────────────────────────────────────────
@@ -186,7 +187,10 @@ function CrossedBadge({ direction }) {
 }
 
 export default function LiquidityLevelList() {
-  const { levels, addLevel, updateLevel, removeLevel, activeTimeframe, getFilteredLevels } = useResearch();
+  const {
+    levels, addLevel, updateLevel, removeLevel, activeTimeframe, getFilteredLevels,
+    selectedLevelId, toggleSelectedLevel, addPlanItem, drawThesis,
+  } = useResearch();
   const { lastPrice, isLive } = useLivePrice();
   const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceInput();
   const [isAdding, setIsAdding] = useState(false);
@@ -330,6 +334,25 @@ export default function LiquidityLevelList() {
     localStorage.setItem('lh_avwap_plans', JSON.stringify(updated));
   };
 
+  // ── Level actions (Analyze / Add to Plan / Paper Trade) ──────────────────
+  // "Analyze" focuses the level across the app and makes sure the ladder shows
+  // it. "Add to Plan" appends a persisted plan item. "Paper Trade" reuses the
+  // existing prefill event contract.
+  const [justPlanned, setJustPlanned] = useState(null); // levelId flashed as added
+  const analyzeLevel = (level) => {
+    toggleSelectedLevel(level.id);
+    try { window.dispatchEvent(new CustomEvent('lh:show-ladder')); } catch {}
+  };
+  const addLevelToPlan = (level) => {
+    const item = buildPlanItem(level, { drawThesis });
+    if (item) {
+      addPlanItem(item);
+      setJustPlanned(level.id);
+      setTimeout(() => setJustPlanned((cur) => (cur === level.id ? null : cur)), 1400);
+      try { window.dispatchEvent(new CustomEvent('lh:open-plan')); } catch {}
+    }
+  };
+
   // Show levels for active timeframe
   const filteredLevels = getFilteredLevels(activeTimeframe);
   const sortedLevels = [...filteredLevels].sort((a, b) => b.price - a.price);
@@ -359,15 +382,15 @@ export default function LiquidityLevelList() {
   }, [sortedLevels, lastPrice]);
 
   return (
-    <div className="panel flex flex-col h-full">
-      <div className="panel-header flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Droplets size={12} />
-          <span>Levels</span>
-          <span className="text-slate-500">({filteredLevels.length})</span>
+    <div className="flex flex-col h-full bg-terminal-surface">
+      {/* Panel header — flat, part of the rail (no card-in-card) */}
+      <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-terminal-border">
+        <div className="flex items-center gap-1.5">
+          <Droplets size={12} className="text-cyan-300" />
+          <span className="text-[10px] uppercase tracking-widest font-semibold text-slate-300">Liquidity</span>
+          <span className="text-[10px] text-slate-600 tabular-nums">{filteredLevels.length}</span>
         </div>
         <div className="flex items-center gap-1">
-          {/* Voice button */}
           {isSupported && (
             <button
               onClick={toggleVoice}
@@ -381,13 +404,24 @@ export default function LiquidityLevelList() {
               {isListening ? <MicOff size={12} /> : <Mic size={12} />}
             </button>
           )}
-          <button
-            onClick={() => setIsAdding(!isAdding)}
-            className="text-slate-400 hover:text-accent-blue transition-colors"
-          >
-            <Plus size={14} />
-          </button>
         </div>
+      </div>
+
+      {/* Primary action — Add Liquidity Level (the most obvious action in the rail) */}
+      <div className="shrink-0 px-2 pt-2">
+        <button
+          onClick={() => setIsAdding((v) => !v)}
+          aria-expanded={isAdding}
+          className={cn(
+            'w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-[11px] font-semibold border transition-all',
+            isAdding
+              ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/40'
+              : 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/20',
+          )}
+        >
+          {isAdding ? <X size={13} /> : <Plus size={13} />}
+          {isAdding ? 'Close' : 'Add Liquidity Level'}
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -439,9 +473,34 @@ export default function LiquidityLevelList() {
           </div>
         )}
 
-        {/* Manual Add Form */}
+        {/* Manual Add Form — command-like: price first, BSL/SSL as toggle chips */}
         {isAdding && (
-          <form onSubmit={handleAdd} className="space-y-2 p-2 bg-terminal-bg rounded border border-terminal-border mb-2">
+          <form onSubmit={handleAdd} className="space-y-2 p-2 bg-terminal-bg rounded border border-cyan-500/20 mb-2">
+            {/* Price + BSL/SSL side toggle (the two decisions that matter most) */}
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Price *"
+                value={form.price}
+                onChange={(e) => setForm({ ...form, price: e.target.value })}
+                className="flex-1 text-xs font-mono tabular-nums"
+                autoFocus
+                required
+              />
+              <div className="flex items-center rounded overflow-hidden border border-terminal-border shrink-0">
+                <button type="button" onClick={() => setForm({ ...form, side: 'Buy-Side' })}
+                  className={cn('px-2 py-1 text-[10px] font-semibold transition-colors',
+                    form.side === 'Buy-Side' ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-500 hover:text-slate-300')}>
+                  BSL
+                </button>
+                <button type="button" onClick={() => setForm({ ...form, side: 'Sell-Side' })}
+                  className={cn('px-2 py-1 text-[10px] font-semibold transition-colors border-l border-terminal-border',
+                    form.side === 'Sell-Side' ? 'bg-orange-500/20 text-orange-300' : 'text-slate-500 hover:text-slate-300')}>
+                  SSL
+                </button>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-1">
               <input
                 placeholder="Label (optional)"
@@ -449,26 +508,6 @@ export default function LiquidityLevelList() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 className="text-xs"
               />
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Price *"
-                value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-                className="text-xs"
-                required
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              <select
-                value={form.side}
-                onChange={(e) => setForm({ ...form, side: e.target.value })}
-                className="text-xs"
-              >
-                {LIQUIDITY_SIDES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
               <select
                 value={form.pool_type}
                 onChange={(e) => setForm({ ...form, pool_type: e.target.value })}
@@ -515,7 +554,9 @@ export default function LiquidityLevelList() {
               className="w-full text-xs"
             />
             <div className="flex gap-1">
-              <button type="submit" className="btn btn-primary flex-1">Add Level</button>
+              <button type="submit" className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded text-[11px] font-semibold bg-cyan-500/15 text-cyan-200 border border-cyan-500/40 hover:bg-cyan-500/25 transition-colors">
+                <Plus size={12} /> Add Level
+              </button>
               <button type="button" onClick={() => setIsAdding(false)} className="btn btn-ghost">Cancel</button>
             </div>
           </form>
@@ -523,8 +564,10 @@ export default function LiquidityLevelList() {
 
         {/* Level List */}
         {sortedLevels.length === 0 && !isAdding && !isListening && !voiceParsed && (
-          <div className="text-center text-slate-600 text-xs py-6">
-            No levels for {activeTimeframe}
+          <div className="text-center text-slate-600 text-xs py-8 px-4">
+            <Droplets size={20} className="mx-auto text-slate-700 mb-2" />
+            <p>No liquidity mapped for <span className="text-slate-400">{activeTimeframe}</span>.</p>
+            <p className="text-[10px] text-slate-600 mt-1">Add a level to begin mapping.</p>
           </div>
         )}
 
@@ -586,89 +629,132 @@ export default function LiquidityLevelList() {
             );
           }
 
+          const isSelected = selectedLevelId === level.id;
+
           return (
             <React.Fragment key={level.id}>
               {priceRow}
               <div
                 className={cn(
-                  'flex items-center gap-2 p-1.5 rounded border transition-colors group',
-                  isSwept
+                  'rounded border transition-colors group',
+                  isSelected
+                    ? 'border-white/60 bg-white/[0.06] shadow-sm shadow-white/5'
+                    : isSwept
                     ? 'bg-terminal-bg/50 border-terminal-border/50 opacity-60'
                     : wasCrossed
                     ? 'bg-violet-500/5 border-violet-500/30 hover:border-violet-400/50'
                     : 'bg-terminal-bg border-terminal-border hover:border-terminal-border-light',
                 )}
               >
-                {/* Side indicator */}
-                <div className={`w-1 h-8 rounded-full ${
-                  level.side === 'Buy-Side' ? 'bg-cyan-500' : 'bg-orange-500'
-                }`} />
+                <div className="flex items-center gap-2 p-1.5">
+                  {/* Side indicator */}
+                  <div className={`w-1 h-8 rounded-full ${
+                    level.side === 'Buy-Side' ? 'bg-cyan-500' : 'bg-orange-500'
+                  }`} />
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <StrengthDot strength={level.strength} />
-                    <span className={`text-xs font-medium truncate ${isSwept ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
-                      {level.name || level.pool_type}
-                    </span>
-                    <span className="text-[9px] text-slate-600">{level.timeframe}</span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] tabular-nums text-slate-400">
-                      {level.price.toFixed(2)}
-                    </span>
-                    <span className={`text-[9px] ${level.side === 'Buy-Side' ? 'text-cyan-600' : 'text-orange-600'}`}>
-                      {level.side === 'Buy-Side' ? 'BSL' : 'SSL'}
-                    </span>
-                    {/* Distance from current price */}
-                    {lastPrice > 0 && (
-                      <span className="text-[9px] text-slate-600 tabular-nums">
-                        {level.price > lastPrice ? '+' : ''}{(level.price - lastPrice).toFixed(1)}
+                  {/* Info — click to select/focus this level across the app */}
+                  <button
+                    type="button"
+                    onClick={() => toggleSelectedLevel(level.id)}
+                    className="flex-1 min-w-0 text-left"
+                    title={isSelected ? 'Click to unfocus' : 'Click to analyze this level'}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <StrengthDot strength={level.strength} />
+                      <span className={cn('text-xs font-medium truncate',
+                        isSwept ? 'text-slate-500 line-through' : isSelected ? 'text-white' : 'text-slate-200')}>
+                        {level.name || level.pool_type}
                       </span>
+                      <span className="text-[9px] text-slate-600">{level.timeframe}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={cn('text-[10px] tabular-nums', isSelected ? 'text-slate-200' : 'text-slate-400')}>
+                        {level.price.toFixed(2)}
+                      </span>
+                      <span className={`text-[9px] ${level.side === 'Buy-Side' ? 'text-cyan-600' : 'text-orange-600'}`}>
+                        {level.side === 'Buy-Side' ? 'BSL' : 'SSL'}
+                      </span>
+                      {/* Distance from current price */}
+                      {lastPrice > 0 && (
+                        <span className="text-[9px] text-slate-600 tabular-nums">
+                          {level.price > lastPrice ? '+' : ''}{(level.price - lastPrice).toFixed(1)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+
+                  {/* Crossed-while-closed badge */}
+                  {wasCrossed && !isSwept && (
+                    <CrossedBadge direction={crossDirection} />
+                  )}
+
+                  {/* Sweep Status Badge */}
+                  <SweepBadge
+                    status={level.sweep_status}
+                    onCycle={() => cycleSweepStatus(level)}
+                  />
+
+                  {/* AVWAP toggle */}
+                  <button
+                    onClick={() => toggleAvwapPlan(level)}
+                    className={cn('text-[8px] px-1 py-0.5 rounded border transition-all',
+                      hasAvwapPlan(level.id)
+                        ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+                        : 'opacity-0 group-hover:opacity-100 text-zinc-600 border-zinc-700 hover:text-purple-400 hover:border-purple-500/30'
                     )}
-                  </div>
+                    title={hasAvwapPlan(level.id) ? 'AVWAP planned — click to remove' : 'Plan AVWAP anchor on sweep'}
+                  >
+                    V
+                  </button>
+
+                  {/* Edit */}
+                  <button
+                    onClick={() => startEdit(level)}
+                    className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-accent-blue transition-all"
+                    title="Edit level"
+                  >
+                    <Pencil size={12} />
+                  </button>
+
+                  {/* Remove */}
+                  <button
+                    onClick={() => removeLevel(level.id)}
+                    className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all"
+                    title="Remove level"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
 
-                {/* Crossed-while-closed badge */}
-                {wasCrossed && !isSwept && (
-                  <CrossedBadge direction={crossDirection} />
+                {/* Contextual actions — only for the focused level */}
+                {isSelected && (
+                  <div className="flex items-center gap-1 px-1.5 pb-1.5 pt-0.5 border-t border-white/10">
+                    <button
+                      onClick={() => analyzeLevel(level)}
+                      className="flex items-center gap-1 px-1.5 py-1 rounded text-[9px] font-medium text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 transition-colors"
+                      title="Focus this level on the ladder"
+                    >
+                      <Crosshair size={10} /> Analyze
+                    </button>
+                    <button
+                      onClick={() => addLevelToPlan(level)}
+                      className={cn('flex items-center gap-1 px-1.5 py-1 rounded text-[9px] font-medium border transition-colors',
+                        justPlanned === level.id
+                          ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40'
+                          : 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20')}
+                      title="Add this level to your game plan"
+                    >
+                      {justPlanned === level.id ? <><Check size={10} /> Added</> : <><ClipboardPlus size={10} /> Add to Plan</>}
+                    </button>
+                    <button
+                      onClick={() => paperTradeFromLevel(level)}
+                      className="flex items-center gap-1 px-1.5 py-1 rounded text-[9px] font-medium text-purple-300 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-colors"
+                      title="Open a paper trade prefilled from this level"
+                    >
+                      <FlaskConical size={10} /> Paper Trade
+                    </button>
+                  </div>
                 )}
-
-                {/* Sweep Status Badge */}
-                <SweepBadge
-                  status={level.sweep_status}
-                  onCycle={() => cycleSweepStatus(level)}
-                />
-
-                {/* AVWAP toggle */}
-                <button
-                  onClick={() => toggleAvwapPlan(level)}
-                  className={cn('text-[8px] px-1 py-0.5 rounded border transition-all',
-                    hasAvwapPlan(level.id)
-                      ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-                      : 'opacity-0 group-hover:opacity-100 text-zinc-600 border-zinc-700 hover:text-purple-400 hover:border-purple-500/30'
-                  )}
-                  title={hasAvwapPlan(level.id) ? 'AVWAP planned — click to remove' : 'Plan AVWAP anchor on sweep'}
-                >
-                  V
-                </button>
-
-                {/* Edit */}
-                <button
-                  onClick={() => startEdit(level)}
-                  className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-accent-blue transition-all"
-                  title="Edit level"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                </button>
-
-                {/* Remove */}
-                <button
-                  onClick={() => removeLevel(level.id)}
-                  className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all"
-                >
-                  <X size={12} />
-                </button>
               </div>
             </React.Fragment>
           );

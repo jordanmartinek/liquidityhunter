@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Gauge } from 'lucide-react';
 
 /**
  * Discipline Wheel — a radial checklist that fills up as you tick off your
@@ -152,7 +153,7 @@ export default function DisciplineWheel() {
   return (
     <div className="panel">
       <div className="panel-header flex items-center gap-2">
-        <span>🎯</span>
+        <Gauge size={12} className="text-emerald-300" />
         <span>Discipline</span>
         <span className="text-[9px] text-slate-600 ml-auto">{checked}/{total} rules</span>
         <button onClick={() => setEditMode(e => !e)}
