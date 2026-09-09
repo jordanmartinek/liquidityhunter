@@ -108,6 +108,22 @@ body {
 .btn-danger { @apply bg-accent-red hover:bg-red-600 text-white; }
 .btn-ghost { @apply bg-transparent hover:bg-terminal-panel text-slate-400 hover:text-slate-200 border border-terminal-border; }
 
+/* ─── Redesign: workspace polish ───────────────────────────────────────── */
+/* Reusable "metadata label" — small uppercase caption for dense panels. */
+.meta-label {
+  @apply text-[8px] uppercase tracking-widest text-slate-600 leading-none;
+}
+/* Analysis-group sticky headers should sit above scrolling panel content. */
+.scroll-mt-2 { scroll-margin-top: 0.5rem; }
+/* Keyboard focus: a subtle, consistent ring instead of the default outline. */
+button:focus-visible,
+[role="tab"]:focus-visible,
+[role="button"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.5);
+  border-radius: 4px;
+}
+
 /* ─── Trading Mode Screen Glow ─────────────────────────────────────────── */
 .screen-glow {
   position: fixed;

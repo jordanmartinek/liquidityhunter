@@ -94,6 +94,28 @@ export function ResearchProvider({ children }) {
   // ─── Liquidity Levels ─────────────────────────────────────────
   const [levels, setLevels] = useState([]);
 
+  // ─── Selected Level (cross-panel focus) ───────────────────────
+  // The liquidity level the trader is currently analyzing. This is the
+  // "connective tissue" that ties the list, the ladder and the planning tools
+  // together. Intentionally NOT persisted — a fresh session starts unfocused.
+  const [selectedLevelId, setSelectedLevelId] = useState(null);
+
+  // ─── Game Plan Items (persisted) ──────────────────────────────
+  // A trader-authored plan list. Mirrors the AVWAP-plans persistence pattern
+  // (a JSON array under an lh_* localStorage key) so we don't disturb the
+  // auto-derived GamePlanPanel while still letting the trader "Add to Plan".
+  const GAME_PLAN_KEY = 'lh_game_plan_items';
+  const [gamePlanItems, setGamePlanItems] = useState(() => {
+    try {
+      const raw = localStorage.getItem(GAME_PLAN_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(GAME_PLAN_KEY, JSON.stringify(gamePlanItems)); } catch {}
+  }, [gamePlanItems]);
+
   // ─── Session Notes ────────────────────────────────────────────
   const [sessionNotes, setSessionNotes] = useState([]);
   const [currentDate, setCurrentDate] = useState(getToday());
@@ -157,6 +179,34 @@ export function ResearchProvider({ children }) {
   const removeLevel = useCallback((id) => {
     db.remove(ENTITIES.LIQUIDITY_ZONES, id);
     setLevels((prev) => prev.filter((l) => l.id !== id));
+    // Clear focus if the deleted level was the one being analyzed.
+    setSelectedLevelId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  // ─── Level Selection ──────────────────────────────────────────
+  // Toggle-select: clicking the already-selected level clears the focus.
+  const toggleSelectedLevel = useCallback((id) => {
+    setSelectedLevelId((cur) => (cur === id ? null : id));
+  }, []);
+
+  // ─── Game Plan Items CRUD (persisted) ─────────────────────────
+  const addPlanItem = useCallback((item) => {
+    const newItem = {
+      id: `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      created: new Date().toISOString(),
+      status: 'planned', // planned | triggered | invalidated | done
+      ...item,
+    };
+    setGamePlanItems((prev) => [newItem, ...prev]);
+    return newItem;
+  }, []);
+
+  const updatePlanItem = useCallback((id, updates) => {
+    setGamePlanItems((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+  }, []);
+
+  const removePlanItem = useCallback((id) => {
+    setGamePlanItems((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
   // ─── Session Notes CRUD ───────────────────────────────────────
@@ -419,6 +469,17 @@ export function ResearchProvider({ children }) {
     removeLevel,
     getFilteredLevels,
 
+    // Level selection (cross-panel focus)
+    selectedLevelId,
+    setSelectedLevelId,
+    toggleSelectedLevel,
+
+    // Game Plan Items (persisted)
+    gamePlanItems,
+    addPlanItem,
+    updatePlanItem,
+    removePlanItem,
+
     // Session Notes
     sessionNotes,
     saveSessionNote,
@@ -459,6 +520,8 @@ export function ResearchProvider({ children }) {
   }), [
     symbol, activeTimeframe,
     levels, addLevel, updateLevel, removeLevel, getFilteredLevels,
+    selectedLevelId, setSelectedLevelId, toggleSelectedLevel,
+    gamePlanItems, addPlanItem, updatePlanItem, removePlanItem,
     sessionNotes, saveSessionNote, getSessionNote, currentDate,
     drawDirection, updateDrawDirection, drawThesis, updateDrawThesis,
     totalLevels, untouchedCount, testedCount, sweptCount, bslCount, sslCount,

@@ -25,6 +25,7 @@ import { readLevelApproach, readValueAreaPullback } from '@/lib/momentum';
 import LadderIntelligenceOverlay from './LadderIntelligenceOverlay';
 import LadderExtrasOverlay from './LadderExtrasOverlay';
 import { computeLiquidityHeatmap, heatmapToGradient, getActiveKillZone, getKillZoneOpacity, calculateETAs } from '@/lib/ladderExtras';
+import { paperTradeFromLevel } from '@/lib/levelActions';
 import { calculateOrderFlow, getSessionProgress, getPhaseLabel } from '@/lib/priceNarrative';
 import { ladderAudio } from '@/lib/ladderAudio';
 import { requestPermission as requestNotifyPermission, sendNotification } from '@/lib/notifications';
@@ -96,6 +97,7 @@ function Rung({
   displacementState, ageOpacity, mtfDepth, sweepProb, timeAtLevel,
   isStalling, onDragStart, isDragTarget, glowIntensity, blurFactor, dynamicWidth, hasSFP, onContextMenu,
   blurEnabled, whatIf, comfortable, sweepReaction, confluence, eta, wickReached, brightness = 1, momentum,
+  isSelected, onSelect,
 }) {
   const strength = getStrengthConfig(level.strength);
   const isBSL = level.side === 'Buy-Side';
@@ -134,6 +136,8 @@ function Rung({
         isStalling && !isSwept && 'ring-2 ring-yellow-400/50 rounded',
         isDragTarget && 'ring-2 ring-teal-400/60 rounded',
         whatIf?.wouldSweep && !isSwept && 'ring-2 ring-purple-400/70 rounded bg-purple-500/10',
+        // Selected level: strongest, unambiguous focus treatment.
+        isSelected && 'ring-2 ring-white/80 rounded bg-white/5 z-30',
       )}
       style={{
         top: `${percent}%`,
@@ -148,6 +152,7 @@ function Rung({
       aria-label={`${isBSL ? 'Buy-side' : 'Sell-side'} liquidity ${level.name || level.pool_type} at ${level.price.toFixed(2)}, ${level.sweep_status || 'Untouched'}${isImminent ? ', price imminent' : ''}`}
       title={`${isBSL ? 'BSL (Buy-Side)' : 'SSL (Sell-Side)'} · ${level.name || level.pool_type} · ${level.price.toFixed(2)} · ${level.sweep_status || 'Untouched'}`}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, level); }}
+      onClick={() => onSelect?.(level)}
     >
       {/* Distance + Sweep Prob (left) */}
       <div className="w-14 shrink-0 text-right pr-1">
@@ -403,6 +408,7 @@ export default function LiquidityLadder() {
     getFilteredLevels, activeTimeframe, drawDirection,
     displacements, watchingLevels, updateLevel, sessionLevelsState,
     addLevel, removeLevel, symbol,
+    selectedLevelId, toggleSelectedLevel,
   } = useResearch();
   const { lastPrice, isLive, priceStale, updateLastPrice, liveOHLC } = useLivePrice();
   const filteredLevels = getFilteredLevels(activeTimeframe);
@@ -2950,6 +2956,8 @@ export default function LiquidityLadder() {
               eta={etaByLevel[level.id] || null}
               wickReached={wickReached}
               brightness={brightnessFactor}
+              isSelected={selectedLevelId === level.id}
+              onSelect={(lvl) => toggleSelectedLevel(lvl.id)}
               momentum={momentumReads[level.id] || null}
             />
           );
@@ -3309,28 +3317,8 @@ export default function LiquidityLadder() {
               <span>🔔</span> Add Alert Zone (±{alertBandWidth}pts)
             </button>
             <button onClick={() => {
-              const lvl = contextMenu.level;
-              // Sweeping sell-side liquidity → long; buy-side → short.
-              const direction = lvl.side === 'Sell-Side' ? 'long' : 'short';
-              const buffer = Math.max(lvl.price * 0.0006, 2);
-              const entry = lvl.price;
-              const stop = direction === 'long' ? lvl.price - buffer : lvl.price + buffer;
-              const risk = Math.abs(entry - stop);
-              const target = direction === 'long' ? entry + risk * 2 : entry - risk * 2; // default 2R
-              const payload = {
-                direction,
-                entry: parseFloat(entry.toFixed(2)),
-                stop: parseFloat(stop.toFixed(2)),
-                target: parseFloat(target.toFixed(2)),
-                levelType: lvl.name || lvl.pool_type || '',
-              };
-              try {
-                // Stash for the panel to pick up if it isn't mounted yet, then
-                // request the Paper tab + fire the live event for the mounted case.
-                window.__lhPaperPrefill = payload;
-                window.dispatchEvent(new CustomEvent('lh:open-paper'));
-                window.dispatchEvent(new CustomEvent('lh:paper-prefill', { detail: payload }));
-              } catch {}
+              // Shared helper builds the payload and fires the prefill events.
+              paperTradeFromLevel(contextMenu.level);
               closeContextMenu();
             }}
               className="w-full px-3 py-1.5 text-left text-[10px] text-purple-400 hover:bg-purple-500/10 flex items-center gap-2">
