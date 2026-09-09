@@ -382,7 +382,7 @@ export default function LiquidityLevelList() {
   }, [sortedLevels, lastPrice]);
 
   return (
-    <div className="flex flex-col h-full bg-terminal-surface">
+    <div className="lh-levels flex flex-col h-full bg-terminal-surface">
       {/* Panel header — flat, part of the rail (no card-in-card) */}
       <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-terminal-border">
         <div className="flex items-center gap-1.5">
