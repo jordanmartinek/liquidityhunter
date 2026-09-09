@@ -214,7 +214,7 @@ function poll() {
   }
 }
 
-console.log(`[LH Bridge] Reader v1.8.2 active in ${IS_TOP_FRAME ? 'TOP frame' : 'sub-frame'} — click-to-mark levels enabled`);
+console.log(`[LH Bridge] Reader v1.8.3 active in ${IS_TOP_FRAME ? 'TOP frame' : 'sub-frame'} — click-to-mark levels enabled`);
 // The price poll + status badge belong to the top frame only. Sub-frames still
 // run the click listener (below) so clicks on the chart canvas are captured.
 if (IS_TOP_FRAME) {
@@ -245,49 +245,56 @@ let markMode = false;
 // relying on brittle class selectors we scan ALL small on-screen elements whose
 // text parses as a price and pick the one positioned on the right-hand price
 // axis nearest the click's Y. This is resilient to TradingView renames.
-function readCrosshairAxisPrice(clickY) {
-  const vw = window.innerWidth;
-  let best = null;
-  let bestDy = Infinity;
-  const els = document.querySelectorAll('div, span');
-  for (const el of els) {
-    // Only leaf-ish nodes with short text (a price pill), not big containers.
-    if (el.children && el.children.length > 1) continue;
+// Collect every small on-screen element whose text parses as a plausible price,
+// with its screen position. This is the shared basis for both the crosshair
+// pill read and the tick interpolation, and is layout-agnostic (works whether
+// the chart is full-width on tradingview.com or embedded).
+function collectPricePoints() {
+  const points = [];
+  for (const el of document.querySelectorAll('div, span')) {
+    if (el.children && el.children.length > 1) continue; // leaf-ish only
     const txt = (el.textContent || '').trim();
     if (txt.length === 0 || txt.length > 12) continue;
     const n = parseNum(txt);
     if (!inPriceRange(n)) continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0 || r.height > 40) continue;
-    // The price axis sits on the right edge of the window. Keep elements whose
-    // horizontal center is in the right ~14% of the viewport.
-    if (r.left < vw * 0.86) continue;
-    const cy = r.top + r.height / 2;
-    const dy = clickY == null ? 0 : Math.abs(cy - clickY);
-    if (dy < bestDy) { bestDy = dy; best = n; }
+    if (r.bottom < 0 || r.top > window.innerHeight) continue; // off-screen
+    points.push({ price: n, x: r.left + r.width / 2, y: r.top + r.height / 2 });
   }
-  return best;
+  return points;
+}
+
+// The price axis is the vertical strip where the most price-like labels stack
+// up. Rather than assume it's near the window's right edge (breaks with
+// sidebars / embedded charts), find the densest right-most cluster of price
+// points by X, and keep points in that band.
+function axisPoints(points) {
+  if (points.length < 2) return points;
+  // Sort by X; the axis labels share a similar X. Take the right-most cluster.
+  const xs = points.map((p) => p.x).sort((a, b) => a - b);
+  const maxX = xs[xs.length - 1];
+  // Keep points within 60px of the right-most price label's column.
+  const band = points.filter((p) => Math.abs(p.x - maxX) <= 60);
+  return band.length >= 2 ? band : points;
+}
+
+function readCrosshairAxisPrice(clickY) {
+  const band = axisPoints(collectPricePoints());
+  let best = null;
+  let bestDy = Infinity;
+  for (const p of band) {
+    const dy = clickY == null ? 0 : Math.abs(p.y - clickY);
+    if (dy < bestDy) { bestDy = dy; best = p.price; }
+  }
+  // Only trust it as "the crosshair pill" if it's genuinely near the click.
+  return bestDy <= 24 ? best : null;
 }
 
 // ── Fallback: map a click Y coordinate to a price using visible axis ticks ──
-// Collects numeric labels on the right price scale, pairs each with its on-screen
-// Y midpoint, then linearly interpolates the clicked Y to a price. Approximate,
-// but good enough to drop a level near where you clicked.
+// Linear interpolation between the axis ticks bracketing the click's Y.
 function priceFromClickY(clickY) {
-  const vw = window.innerWidth;
-  const points = [];
-  for (const el of document.querySelectorAll('div, span')) {
-    if (el.children && el.children.length > 1) continue;
-    const txt = (el.textContent || '').trim();
-    if (txt.length === 0 || txt.length > 12) continue;
-    const n = parseNum(txt);
-    if (!inPriceRange(n)) continue;
-    const r = el.getBoundingClientRect();
-    if (r.height === 0 || r.height > 40) continue;
-    // Right-edge price-axis ticks only.
-    if (r.left < vw * 0.86) continue;
-    points.push({ price: n, y: r.top + r.height / 2 });
-  }
+  const points = axisPoints(collectPricePoints());
   if (points.length < 2) return null;
   points.sort((a, b) => a.y - b.y);
   let lo = points[0];
@@ -375,7 +382,15 @@ function onChartClick(e) {
   if (price != null && inPriceRange(price)) {
     queueLevel(price);
   } else {
-    console.warn('[LH Bridge] Could not read a price for that click. Make sure a chart with a visible price axis is loaded, then try again.');
+    // Rich diagnostics so a failure is never a mystery.
+    const nPts = axisPoints(collectPricePoints()).length;
+    console.warn(
+      '[LH Bridge] Could not read a price for that click.\n' +
+      `  • price-axis labels found: ${nPts} (need ≥2 for interpolation)\n` +
+      `  • last live price seen: ${lastKnownPrice ?? 'none'} (start the live feed for a guaranteed fallback)\n` +
+      '  • Fix: make sure a chart with a visible right-hand price axis is loaded, ' +
+      'then try again. If the live price badge (● LH) shows a number, any click will still register.'
+    );
   }
 }
 
