@@ -10,6 +10,15 @@ const POLL_INTERVAL = 1000;
 
 let pollTimer = null;
 
+// The chart canvas on tradingview.com lives in a same-origin iframe, so the
+// reader runs in ALL frames (manifest all_frames:true). Only the TOP frame
+// should render the toggle button, status badge, and run the price poll — but
+// the click listener must run in EVERY frame so a click on the chart canvas
+// (inside the iframe) is captured. Mark mode is shared across frames via
+// chrome.storage so toggling in the top frame reaches the iframe.
+let IS_TOP_FRAME = true;
+try { IS_TOP_FRAME = (window.top === window.self); } catch { IS_TOP_FRAME = false; }
+
 // Is the extension context still alive? After you reload/update or disable the
 // extension, an already-injected content script keeps running but its `chrome.*`
 // APIs are torn down — touching `chrome.storage.local` then throws "Extension
@@ -191,6 +200,7 @@ function poll() {
       };
     }
     try { chrome.storage.local.set(payload); } catch { /* context died mid-poll */ }
+    lastKnownPrice = price; // guaranteed fallback for click-to-mark
     missStreak = 0;
     showStatus(true, price, !!ohlc);
   } else {
@@ -204,10 +214,14 @@ function poll() {
   }
 }
 
-console.log('[LH Bridge] Reader active v1.8.1 — price = last-traded (legend Close); writing every 1s; click-to-mark levels enabled');
-showStatus(false);
-pollTimer = setInterval(poll, POLL_INTERVAL);
-setTimeout(poll, 2000);
+console.log(`[LH Bridge] Reader v1.8.2 active in ${IS_TOP_FRAME ? 'TOP frame' : 'sub-frame'} — click-to-mark levels enabled`);
+// The price poll + status badge belong to the top frame only. Sub-frames still
+// run the click listener (below) so clicks on the chart canvas are captured.
+if (IS_TOP_FRAME) {
+  showStatus(false);
+  pollTimer = setInterval(poll, POLL_INTERVAL);
+  setTimeout(poll, 2000);
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    CLICK-TO-MARK LEVELS
@@ -227,46 +241,54 @@ let markMode = false;
 
 // ── Read the price shown in TradingView's crosshair label on the price axis ──
 // When the crosshair is active, TV renders a small floating price pill on the
-// right axis. We look for an axis-area element whose text parses as a price.
-function readCrosshairAxisPrice() {
-  // TV's price-axis crosshair label carries a class containing "axis" +
-  // "crosshair"/"currentPrice"/"price". Be permissive: scan likely candidates.
-  const selectors = [
-    '[class*="priceAxis"] [class*="crosshair"]',
-    '[class*="price-axis"] [class*="crosshair"]',
-    '[class*="crosshairLabel"]',
-    '[class*="axisCrosshair"]',
-    '[class*="priceScale"] [class*="crosshair"]',
-  ];
-  for (const sel of selectors) {
-    for (const el of document.querySelectorAll(sel)) {
-      const n = parseNum((el.textContent || '').trim());
-      if (inPriceRange(n)) return n;
-    }
-  }
-  return null;
-}
-
-// ── Fallback: map a click Y coordinate to a price using visible axis ticks ──
-// Collects numeric labels on the right price scale, pairs each with its on-screen
-// Y midpoint, then linearly interpolates the clicked Y to a price. Approximate,
-// but good enough to drop a level near where you clicked when no crosshair pill
-// is available.
-function priceFromClickY(clickY) {
-  const axis = document.querySelector('[class*="priceAxis"], [class*="price-axis"], [class*="priceScale"]');
-  const scope = axis || document.body;
-  const points = [];
-  for (const el of scope.querySelectorAll('*')) {
+// right axis. Its class names are obfuscated and change often, so instead of
+// relying on brittle class selectors we scan ALL small on-screen elements whose
+// text parses as a price and pick the one positioned on the right-hand price
+// axis nearest the click's Y. This is resilient to TradingView renames.
+function readCrosshairAxisPrice(clickY) {
+  const vw = window.innerWidth;
+  let best = null;
+  let bestDy = Infinity;
+  const els = document.querySelectorAll('div, span');
+  for (const el of els) {
+    // Only leaf-ish nodes with short text (a price pill), not big containers.
+    if (el.children && el.children.length > 1) continue;
     const txt = (el.textContent || '').trim();
     if (txt.length === 0 || txt.length > 12) continue;
     const n = parseNum(txt);
     if (!inPriceRange(n)) continue;
     const r = el.getBoundingClientRect();
-    if (r.height === 0 || r.height > 40) continue; // skip big containers
+    if (r.width === 0 || r.height === 0 || r.height > 40) continue;
+    // The price axis sits on the right edge of the window. Keep elements whose
+    // horizontal center is in the right ~14% of the viewport.
+    if (r.left < vw * 0.86) continue;
+    const cy = r.top + r.height / 2;
+    const dy = clickY == null ? 0 : Math.abs(cy - clickY);
+    if (dy < bestDy) { bestDy = dy; best = n; }
+  }
+  return best;
+}
+
+// ── Fallback: map a click Y coordinate to a price using visible axis ticks ──
+// Collects numeric labels on the right price scale, pairs each with its on-screen
+// Y midpoint, then linearly interpolates the clicked Y to a price. Approximate,
+// but good enough to drop a level near where you clicked.
+function priceFromClickY(clickY) {
+  const vw = window.innerWidth;
+  const points = [];
+  for (const el of document.querySelectorAll('div, span')) {
+    if (el.children && el.children.length > 1) continue;
+    const txt = (el.textContent || '').trim();
+    if (txt.length === 0 || txt.length > 12) continue;
+    const n = parseNum(txt);
+    if (!inPriceRange(n)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.height === 0 || r.height > 40) continue;
+    // Right-edge price-axis ticks only.
+    if (r.left < vw * 0.86) continue;
     points.push({ price: n, y: r.top + r.height / 2 });
   }
   if (points.length < 2) return null;
-  // Use the two ticks that best bracket the click (or the extremes).
   points.sort((a, b) => a.y - b.y);
   let lo = points[0];
   let hi = points[points.length - 1];
@@ -276,11 +298,14 @@ function priceFromClickY(clickY) {
     }
   }
   if (hi.y === lo.y) return null;
-  // Y grows downward while price grows upward → invert.
   const t = (clickY - lo.y) / (hi.y - lo.y);
   const price = lo.price + t * (hi.price - lo.price);
   return inPriceRange(price) ? price : null;
 }
+
+// Last known live price (from the poll loop) — the guaranteed fallback so a
+// click is never silently lost. Updated each successful poll.
+let lastKnownPrice = null;
 
 function queueLevel(price) {
   const rounded = Math.round(price * 100) / 100;
@@ -335,15 +360,27 @@ function onChartClick(e) {
   // Ignore clicks on the toggle button / status pill themselves.
   const t = e.target;
   if (t && (t.id === 'lh-mark-toggle' || t.closest?.('#lh-mark-toggle'))) return;
-  const price = readCrosshairAxisPrice() ?? priceFromClickY(e.clientY);
-  if (price !== null) {
+
+  // Price-reading chain, most precise first:
+  //  1) the crosshair price pill on the right axis nearest the click,
+  //  2) interpolation from the visible axis ticks at the click's Y,
+  //  3) the current live price (guaranteed fallback — never lose a click).
+  const fromAxis = readCrosshairAxisPrice(e.clientY);
+  const fromTicks = fromAxis == null ? priceFromClickY(e.clientY) : null;
+  const price = fromAxis ?? fromTicks ?? lastKnownPrice;
+
+  const via = fromAxis != null ? 'axis-pill' : fromTicks != null ? 'tick-interp' : (price != null ? 'live-price' : 'none');
+  console.log(`[LH Bridge] Mark click @Y=${Math.round(e.clientY)} → price=${price ?? 'null'} (via ${via})`);
+
+  if (price != null && inPriceRange(price)) {
     queueLevel(price);
   } else {
-    console.warn('[LH Bridge] Could not read a price for that click — move the crosshair onto the chart and try again.');
+    console.warn('[LH Bridge] Could not read a price for that click. Make sure a chart with a visible price axis is loaded, then try again.');
   }
 }
 
-function setMarkMode(on) {
+// Apply mark-mode UI/cursor in THIS frame (called locally and on storage sync).
+function applyMarkMode(on) {
   markMode = on;
   const btn = document.getElementById('lh-mark-toggle');
   if (btn) {
@@ -351,8 +388,17 @@ function setMarkMode(on) {
     btn.style.borderColor = on ? '#2dd4bf' : '#3f3f46';
     btn.textContent = on ? '⌖ Marking — click a price' : '⌖ Mark level';
   }
-  // Use a crosshair cursor over the page while marking.
-  document.body.style.cursor = on ? 'crosshair' : '';
+  // Crosshair cursor over the page while marking (in whatever frame we're in).
+  try { document.body.style.cursor = on ? 'crosshair' : ''; } catch {}
+}
+
+// Toggle mark mode and broadcast to all frames via chrome.storage so the click
+// listener in the chart iframe sees the same state as the top-frame button.
+function setMarkMode(on) {
+  applyMarkMode(on);
+  if (extensionAlive()) {
+    try { chrome.storage.local.set({ lh_mark_mode: on }); } catch {}
+  }
 }
 
 function buildMarkToggle() {
@@ -374,11 +420,39 @@ function buildMarkToggle() {
   document.body.appendChild(btn);
 }
 
-buildMarkToggle();
+// UI (toggle button) only in the top frame; the click listener runs everywhere.
+if (IS_TOP_FRAME) buildMarkToggle();
+
 // Capture-phase so we read the price before TV's own handlers mutate the DOM.
 document.addEventListener('click', onChartClick, true);
-// Keyboard shortcut: Alt+M toggles mark mode; Esc exits it.
+
+// Keyboard shortcut: Alt+M toggles mark mode; Esc exits it (works in any frame).
 document.addEventListener('keydown', (e) => {
   if (e.altKey && (e.key === 'm' || e.key === 'M')) { e.preventDefault(); setMarkMode(!markMode); }
   else if (e.key === 'Escape' && markMode) { setMarkMode(false); }
 });
+
+// Keep every frame's mark-mode state in sync (top-frame button ↔ iframe clicks).
+if (extensionAlive()) {
+  try {
+    chrome.storage.local.get(['lh_mark_mode'], (r) => {
+      if (chrome.runtime && chrome.runtime.lastError) return;
+      if (r && typeof r.lh_mark_mode === 'boolean') applyMarkMode(r.lh_mark_mode);
+    });
+    // Seed the live-price fallback in this frame (esp. sub-frames, which don't
+    // run the poll) so a click always has a price to fall back to.
+    chrome.storage.local.get(['lh_live_price'], (r) => {
+      if (chrome.runtime && chrome.runtime.lastError) return;
+      const p = r && r.lh_live_price && r.lh_live_price.price;
+      if (inPriceRange(p)) lastKnownPrice = p;
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if (changes.lh_mark_mode) applyMarkMode(!!changes.lh_mark_mode.newValue);
+      if (changes.lh_live_price) {
+        const p = changes.lh_live_price.newValue && changes.lh_live_price.newValue.price;
+        if (inPriceRange(p)) lastKnownPrice = p;
+      }
+    });
+  } catch {}
+}

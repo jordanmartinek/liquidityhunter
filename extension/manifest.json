@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LiquidityHunter Price Bridge",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "Streams live price + OHLC + volume from TradingView to LiquidityHunter, and lets you click prices on the chart to add liquidity levels",
   "permissions": ["storage"],
   "content_scripts": [
@@ -11,7 +11,8 @@
         "https://*.tradingview.com/*"
       ],
       "js": ["reader.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     },
     {
       "matches": [
