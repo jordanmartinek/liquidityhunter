@@ -91,12 +91,41 @@ body {
 .badge-blue { @apply bg-blue-500/20 text-blue-400 border border-blue-500/30; }
 .badge-orange { @apply bg-orange-500/20 text-orange-400 border border-orange-500/30; }
 
+/* ─── Form-control safety net ──────────────────────────────────────────── */
+/* App-wide default so a form control that forgets its own colors is never
+   invisible (e.g. white text on a white default background). Components that
+   set their own bg-*/text-* Tailwind classes still win via specificity/order;
+   this only fills the gap for bare inputs. */
+@layer base {
+  input, select, textarea {
+    color: #e2e8f0;               /* slate-200 — readable on the dark UI */
+    background-color: #0d1320;    /* terminal panel */
+  }
+  select option { background-color: #0d1320; color: #e2e8f0; }
+}
+
 /* ─── Input styles (research mode) ─────────────────────────────────────── */
-.panel input, .panel select, .panel textarea {
+/* Applies to panels AND the flat Levels rail (which is no longer a `.panel`
+   card but still needs readable dark-on-light form controls). Without this,
+   inputs fall back to browser defaults and text can render invisible. */
+.panel input, .panel select, .panel textarea,
+.lh-levels input, .lh-levels select, .lh-levels textarea {
   @apply bg-terminal-bg border border-terminal-border rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-accent-blue transition-colors;
 }
-.panel select {
+.panel select,
+.lh-levels select {
   @apply appearance-none cursor-pointer;
+}
+/* Placeholder contrast so hints are legible but clearly secondary. */
+.panel input::placeholder, .panel textarea::placeholder,
+.lh-levels input::placeholder, .lh-levels textarea::placeholder {
+  @apply text-slate-500;
+}
+/* Dropdown option list renders with the OS theme; force dark so option text
+   isn't dark-on-dark (or invisible) in the select popup. */
+.lh-levels select option {
+  background-color: #0d1320;
+  color: #e2e8f0;
 }
 
 /* ─── Button styles (research mode) ────────────────────────────────────── */
